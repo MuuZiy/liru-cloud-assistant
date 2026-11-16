@@ -1,0 +1,6 @@
+*.bat -text
+*.ps1 -text
+*.py -text
+*.html -text
+*.js -text
+*.css -text

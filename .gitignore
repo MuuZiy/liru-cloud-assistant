@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+/脚本/runtime/
+edge_profile/
+DevToolsActivePort
+Local State
+Cookies
+Login Data
+配置.json
+课程结构.json
+请求节奏.json
+请求保护.json
+运行日志*.txt
+*.pid
+*.log
+stop.flag
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+*.zip
+*.sha256

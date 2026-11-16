@@ -1,0 +1,2890 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="shared/interface.css">
+<script src="shared/interface.js"></script>
+<title>刷课控制台 · 砺儒云课堂</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23007aff'/%3E%3Ccircle cx='32' cy='32' r='11' fill='white'/%3E%3C/svg%3E">
+<style>
+/* ============================================================================
+   设计规范：控制台样式约定
+   红线：单一 Action Blue 只用于可点击元素；状态色只用于状态；
+        字重只有 300/400/600/700（无 500）；圆角只有 0/5/8/11/18/pill；
+        卡片无阴影；无修饰性渐变；零外部请求。
+   唯一例外：顶栏灵动岛是「系统材质」(system material)，不是卡片。
+        它按 iOS 26 Liquid Glass 的分层方式合成 —— 深色半透底 + 边缘细亮线 +
+        顶部镜面高光 + 内底阴影 + 外部抬升 + 一层柔光。因此它允许出现
+        渐变与阴影，且暗色底上沿用 DESIGN.md 已登记的 Action Blue 暗色变体
+        (#2997ff / #0071e3)。该偏离已记入 DESIGN.md 项目落地约定 §4。
+   ========================================================================== */
+:root{
+  /* colors（取自 DESIGN.md） */
+  --primary:#0066cc; --primary-focus:#0071e3;
+  --ink:#1d1d1f; --ink-80:#333333; --ink-48:#7a7a7a;
+  --divider-soft:#f0f0f0; --ring:rgba(0,0,0,.04); --hairline:#e0e0e0; --edge:rgba(0,0,0,.08);
+  --canvas:#ffffff; --parchment:#f5f5f7; --pearl:#fafafc; --chip:#d2d2d7; --on-primary:#ffffff;
+  /* 状态色：Apple HIG 系统色，仅用于状态元素（见 DESIGN.md 项目落地约定 §1） */
+  --ok:#34c759;      --ok-t:rgba(52,199,89,.12);   --ok-tx:#1c7a3a;
+  --warn:#ff9500;    --warn-t:rgba(255,149,0,.14); --warn-tx:#a05a00;
+  --err:#ff3b30;     --err-t:rgba(255,59,48,.10);  --err-tx:#c4261c;
+  --acc-t:rgba(0,102,204,.10);
+  /* rounded（只用这一套） */
+  --r-xs:5px; --r-sm:8px; --r-md:11px; --r-lg:18px; --r-pill:9999px;
+  /* spacing */
+  --s1:4px; --s2:8px; --s3:12px; --s4:17px; --s5:24px; --s6:32px; --s7:48px; --s8:80px;
+  /* typography */
+  --f-disp:"SF Pro Display",system-ui,-apple-system,"Segoe UI Variable Display","Segoe UI",sans-serif;
+  --f-text:"SF Pro Text",system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",sans-serif;
+  --blur:saturate(180%) blur(20px);
+  --ease:cubic-bezier(.22,1,.36,1);      /* 入场/尺寸过渡：前段快、尾巴长，适合"出现" */
+  /* 悬停专用曲线：两端都缓的 S 形。实算的进度对比（同一条时间轴）：
+       --ease      (.22,1,.36,1): t=10% → 40.1%   t=25% → 76.5%   ← 前段极陡 = 生硬
+       --ease-hover(.4,0,.2,1)  : t=10% →  2.6%   t=25% → 23.7%   ← 平滑滑过去
+     悬停绝不能复用 --ease：变化集中在前 20ms 会读成"啪地切换"，而不是"被光照到"。 */
+  --ease-hover:cubic-bezier(.4,0,.2,1);
+  --motion-fold:350ms;--motion-fold-close:320ms;
+  --motion-io:cubic-bezier(.65,0,.35,1);
+  --motion-menu:250ms;--motion-menu-close:150ms;
+  --island-omega:18;--island-damping:29.5;--island-corner:24px;
+  /* ---- 灵动岛：深色玻璃材质（system material，不是卡片，见 DESIGN.md 项目落地约定 §4） ----
+     深色底上的强调色沿用 DESIGN.md 已登记的暗色变体：Sky Link Blue #2997ff / #0071e3
+     ---- 基色为什么从 28,28,30 改成 16,18,24（2026-10-19，用户实报"灰色的好丑"）----
+     旧值 `.74 × #1C1C1E + .26 × 顶栏浅底(#fafafc)` 合成出来是 **#565658**（中灰、无色相），
+     再叠 16% 的白色顶部高光就成了乳白灰 —— 那就是"脏"的来源：中灰 + 乳白雾。
+     新值把不透明度提到 .92、基色压到冷调墨黑，合成为 **#23252A**，
+     正好落在标准深色层次 #1C1C1E(深) / #2C2C2E(中) 之间，一眼是黑玻璃而不是灰板。
+     冷调（16,18,24 而非等值的灰）与 body 光场里的 rgba(20,22,30) 同一族，全页黑是一套黑。 */
+  --g-ink:16,18,24;                 /* 玻璃基色，配合 rgba() 调节不透明度 */
+  --g-rise:#2997ff;                 /* 暗底强调色（文字 / 图标 / 迷你按钮描边） */
+  --g-fill:#0071e3;                 /* 暗底实心按钮（白字，对比度足够） */
+  --g-ok:#30d158; --g-warn:#ff9f0a; --g-err:#ff453a;   /* HIG 系统色的暗色变体 */
+  /* ---- Q弹缓动：原生 linear() 弹簧（Chrome 113+/Safari 17.2+，覆盖 ~88%） ----
+     不好的做法是给关键帧用 linear()（太长且不可打断）；这里只用于 transition。 */
+  --spring:cubic-bezier(.34,1.56,.64,1);          /* 兜底：带过冲的弹簧近似 */
+  --spring-press:linear(0,.2386 4.2%,.5312 8.6%,.7694 13.2%,.9219 17.9%,1.0116 23.1%,1.0469 28.6%,
+    1.0402 34.5%,1.0103 45.2%,.9933 56.4%,.9953 70%,.9965 79.2%,.9989 88.6%,1);
+  /* ---- 灵动岛专用弹簧（2026-09-16 重调，用户反馈"动画速率还是不够优雅"）----
+     原先岛的尺寸过渡用的是一条叫 --spring-open 的曲线，它的毛病是**前段有个突兀的猛冲**：
+     23.5% 时刚到 1.0087，到 29% 就顶到 1.1004 —— 5.5% 的时间里涨了 9%，
+     读起来是"猛地弹出去再慢慢挪回来"；而且 10% 的过冲对一块 200px 宽的玻璃来说太大，
+     像橡皮糖，不像系统 UI。
+     这条按二阶阻尼弹簧重算：阻尼比 ζ=0.72、固有频率 ωn=22 rad/s、时长 450ms，
+     过冲 3.8%、峰值落在 47% 处、全程最大单段跃升从 0.27 降到 0.14 —— 干净的单峰回弹。
+     苹果的弹性动效本该是这样：到位快、只弹一下、幅度克制。
+     （--spring-open 已随之删除：全文件再无使用者，留着只会引诱以后误用那条曲线。） */
+  /* 2026-10-19 重算：用户实报「回弹有点僵硬」。旧的 ζ=0.72 过冲 3.8%、峰值在 47%、
+     尾巴 250ms 就收干净了 —— 读起来是「到位后立刻不动」。这条按 ζ=0.68、ωn=18、520ms 重算：
+     过冲 5.4%、峰值推到 42%、尾巴更长，弹性更明显但没到橡皮糖（10% 那一档）。 */
+  /* 2026-10-19 第二次重算：用户实报「最后几帧太硬、想柔软一点、可以放慢」。
+     上一版为了让末端落到 1，在 98.4% 硬塞了一个 1 —— 最后 1.6% 的时间跳 0.23%，就是那一下顿。
+     这一版 ζ=0.68、ωn=18、**680ms**（放慢）并按 40 段采样：尾巴天然收敛到 0.9998，
+     末端到 1 的残余只有 0.024%，肉眼不可见。峰值 5.4% 仍在 35% 处，弹性不变、收尾更软。 */
+  /* 2026-10-19 第三次重算：用户要「前一段快速上升、后半段缓慢下降」的速度曲线，并放慢。
+     ζ=0.75、ωn=22、**720ms**：峰值提前到 30%（前段冲得快），过冲收到 2.8%（比上一版 5.4% 更软），
+     剩下 70% 的时间都在缓慢收敛 —— 速度曲线是「快起、长尾」，落地不再有顿感。 */
+  /* 2026-10-19 第四次：用户实报「傻快、僵硬」。上一版峰值在 30% —— 前 30% 就走完全程，
+     剩下 70% 只是在收尾，读起来就是「弹一下然后干等」。这版 ζ=0.76、ωn=15.1、**800ms**：
+     峰值推到 **40%**（速度分布更均匀）、过冲 2.5%、后 60% 平缓收敛 —— 快而不急。 */
+  --spring-island:linear(0,0.03907 2.5%,0.1335 5.0%,0.2561 7.5%,0.3875 10.0%,0.515 12.5%,0.6308 15.0%,0.7308 17.5%,0.8135 20.0%,0.8793 22.5%,0.9296 25.0%,0.9665 27.5%,0.9923 30.0%,1.009 32.5%,1.019 35.0%,1.024 37.5%,1.025 40.0%,1.024 42.5%,1.022 45.0%,1.019 47.5%,1.016 50.0%,1.012 52.5%,1.009 55.0%,1.007 57.5%,1.005 60.0%,1.003 62.5%,1.002 65.0%,1.001 67.5%,1 70.0%,0.9998 72.5%,0.9995 75.0%,0.9994 77.5%,0.9994 80.0%,0.9994 82.5%,0.9994 85.0%,0.9995 87.5%,0.9996 90.0%,0.9997 92.5%,0.9998 95.0%,0.9998 97.5%,1);
+  /* 让 height:auto 参与过渡（Chromium 129+）。只服务灵动岛的展开，别处没有 auto 尺寸过渡 */
+  interpolate-size:allow-keywords;
+  /* ---- 液态玻璃 · 浅色档：和灵动岛的深色档同一套分层思路，只是搬到浅底上 ----
+     真 backdrop-filter 全页共 6 处：顶栏 / 下拉菜单 / 灵动岛（这 3 处底下确实有内容在动）
+     + 三块卡片（底下是环境光场）。卡片这层模糊本身变化很小（光场是平滑的），
+     它的价值在于"内容滚到卡片后面会透出来"——玻璃得是真的玻璃。
+     模糊半径统一压在 18px 以内：再大看不出差别，纯烧 GPU。 */
+  --lg-tint:rgba(255,255,255,.62);                 /* 结构玻璃本体（面板） */
+  --lg-tint-hi:rgba(255,255,255,.80);              /* 控件玻璃：小元素要更实才读得清 */
+  --lg-sheen:linear-gradient(180deg,rgba(255,255,255,.62) 0%,
+            rgba(255,255,255,.10) 38%,rgba(255,255,255,0) 64%);
+  --lg-rim:rgba(0,0,0,.055);                       /* 外轮廓色：浅底上靠它勾形，纯黑低透明（不带色相，否则会显脏） */
+  --lg-ring:inset 0 0 0 1px rgba(0,0,0,.055);      /* 外轮廓做成内阴影而不是 border ——
+                                                      「边框只用来撑高度」时应改用分层阴影，
+                                                      border 只留给真正表达结构/状态的场合 */
+  --lg-ring-blue:inset 0 0 0 1px rgba(0,102,204,.10);
+  --lg-spec:inset 0 1px 0 rgba(255,255,255,.96);   /* 顶部镜面高光（玻璃感的来源） */
+  --lg-inner:inset 0 -1px 1px rgba(0,0,0,.035);    /* 内底阴影（厚度） */
+  --lg-lift-1:0 1px 2px rgba(0,0,0,.035),0 8px 26px rgba(0,0,0,.055);  /* 浮起 · 控件级 */
+  /* 浮起 · 面板级（2026-10-19：用户实报「白卡片没有立体感、深色卡却有」）。
+     三层：① 接触影（贴纸边、紧而浅）② 近影（主体厚度）③ 环境光晕（大而淡，把卡片从底板上托起）。
+     仍严格低于 --lg-lift-2（菜单/浮层）与灵动岛 —— 层级阶梯不乱。 */
+  --lg-lift-panel:0 2px 4px rgba(0,0,0,.045),
+                  0 10px 26px rgba(0,0,0,.075),
+                  0 30px 70px rgba(0,0,0,.060);
+  --lg-lift-2:0 2px 6px rgba(0,0,0,.06),0 16px 44px rgba(0,0,0,.11);   /* 浮起 · 浮层级 */
+  --lg-blur:saturate(180%) blur(18px);
+  /* 玻璃上的状态底纹（比浅色版的实心底纹更淡，否则会盖掉玻璃的透） */
+  --lg-ok-t:rgba(52,199,89,.14);
+  --lg-warn-t:rgba(255,149,0,.16);
+  --lg-err-t:rgba(255,59,48,.13);
+}
+/* 不支持 linear() 的浏览器：退回 cubic-bezier，观感略平但不会坏 */
+@supports not (transition-timing-function:linear(0,1)){
+  :root{--spring-press:cubic-bezier(.34,1.56,.64,1);
+        --spring-island:cubic-bezier(.34,1.28,.52,1)}
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  position:relative;                    /* 给绝对定位的装饰当包含块用（如 .tb-prog 之外的散件）。
+                                           光场已改 fixed（见 body::before 的注释），不再依赖这里。 */
+  min-height:100vh;                     /* 内容比窗口矮时，页面底色也铺满整窗 */
+  background:var(--parchment); color:var(--ink);
+  font:400 17px/1.47 var(--f-text); letter-spacing:-.374px;
+  -webkit-font-smoothing:antialiased;
+  padding-top:52px;                     /* 给固定顶栏让位 */
+  text-wrap:pretty;                     /* 正文断行避免孤字（不支持时就是普通断行） */
+}
+/* 标题与短句做平衡断行：两行的标题不该出现"第一行很长、第二行只剩俩字" */
+.h1,.lead,.ph{text-wrap:balance}
+/* 环境光场：这是整页玻璃能不能"看出来"的前提。
+   玻璃的半透必须有东西可以透出来 —— 底色若是纯色，半透和实心一模一样，卡片就
+   退化成一块白板（早期版本只有 4% 的柔光，就是这个结果）。
+   所以这里给一层有明暗层次的固定光：顶部天光 → 右上角一点品牌蓝 → 底部压暗一档。
+   整体明暗差只有 6% 左右，读起来是"光"，不会变成"渐变背景"。
+   ⚠ 必须用 fixed，不能用 absolute（2026-09-16 用户两次实测"滚到最底有灰白分界线"）：
+   页面存在**超出 body 盒子的隐形溢出** —— 关闭状态的 .menu 是 opacity:0 但仍占滚动区
+   （实测文档可滚 1075px、body 只有 1007px），光场若跟着 body 走，滚到最底就会看到
+   "光场尽头 → 素底"的一条断层；min-height:100vh 只堵得住"窗口比内容高"，
+   堵不住这种隐形溢出。fixed 让光场永远精确等于视口，任何情况下都不可能断层；
+   且 fixed 层滚动时零重绘，对滚动性能只赚不亏。 */
+body::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(72% 42% at 44% -12%,rgba(255,255,255,1) 0%,rgba(255,255,255,0) 62%),
+    radial-gradient(54% 34% at 102% -4%,rgba(0,102,204,.075) 0%,rgba(0,102,204,0) 62%),
+    radial-gradient(58% 40% at -8% 5%,rgba(255,255,255,.9) 0%,rgba(255,255,255,0) 64%),
+    linear-gradient(180deg,rgba(20,22,30,0) 34%,rgba(20,22,30,.065) 100%);
+}
+b,strong{font-weight:600}
+h1,h2,h3,p,ol,ul{margin:0;padding:0}
+li{list-style:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+.num{font-variant-numeric:tabular-nums}
+
+/* ---------- 顶栏：sub-nav-frosted（真玻璃：下面确实有内容在滚） ---------- */
+.topbar{
+  position:fixed;top:0;left:0;right:0;height:52px;z-index:50;
+  background:rgba(250,250,252,.72);
+  backdrop-filter:var(--lg-blur);-webkit-backdrop-filter:var(--lg-blur);
+  border-bottom:1px solid rgba(0,0,0,.045);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.7);
+}
+.tb-in{position:relative;max-width:1200px;height:100%;margin:0 auto;padding:0 24px;
+  display:flex;align-items:center;gap:16px}
+/* 品牌与操作区都取 flex:1 1 0 ⇒ 两侧轨道**恒等宽**，夹在中间的灵动岛必然落在容器
+   正中央 —— 这就是"岛不再偏左"的全部原理（旧写法两侧不参与伸缩，左边品牌 106px、
+   右边操作区 275px，净空本身就不居中，岛于是恒定偏左 85px）。
+   min-width:0 是必须的：去掉它两侧会被自己的内容撑开，宽度立刻重新变得不等。
+   品牌不参与伸缩的顾虑由 min-width:0 + overflow:hidden 兜底（挤到极限时省略号截断）。
+   操作区绝不能截断，所以它的宽度下限由下面 .island 的 max-width 反过来保证。 */
+/* 左轨道：品牌。整条轨道参与 flex:1，左右轨道仍等宽，
+   所以岛的居中算法不受按钮影响（按钮宽度算在左侧轨道内部）。 */
+.tb-left{display:flex;align-items:center;gap:12px;flex:1 1 0;min-width:0;overflow:hidden}
+.tb-brand{font:600 21px/1.19 var(--f-disp);letter-spacing:.231px;white-space:nowrap;
+  flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tb-right{display:flex;align-items:center;gap:14px;min-width:max-content;
+  flex:1 1 0;justify-content:flex-end}
+/* ↑ min-width:max-content 是硬保险：操作区**永不被压到比内容还窄**，所以按钮和状态文字
+   绝不会反压进岛上（哪怕下面那个宽度上限常数哪天估小了，也只会让岛略微偏离中心，
+   不会出现压叠）。它是"轨道等宽 / 岛居中"的兜底，不是主力约束。 */
+.tb-state{display:inline-flex;align-items:center;gap:7px;font:400 14px/1.29 var(--f-text);
+  letter-spacing:-.224px;color:var(--ink-80);white-space:nowrap}
+.sdot{width:8px;height:8px;border-radius:var(--r-pill);background:var(--ink-48);flex:0 0 auto}
+.sdot.run{background:var(--primary);animation:pulse 2.4s var(--ease) infinite}
+.sdot.ok{background:var(--ok)} .sdot.warn{background:var(--warn)} .sdot.err{background:var(--err)}
+.tb-time{font:400 12px/1 var(--f-text);letter-spacing:-.12px;color:var(--ink-48);white-space:nowrap}
+/* 顶栏底边的整体进度细线（3px 实心，不用渐变） */
+.tb-prog{position:absolute;left:0;bottom:-1px;height:3px;width:0;background:var(--primary);
+  transition:width .5s var(--ease)}
+@media (prefers-reduced-motion:reduce){.tb-prog{transition:none}}
+
+/* 可点击元素统一 Action Blue 的三种语法 */
+.link{font:400 14px/1.29 var(--f-text);letter-spacing:-.224px;color:var(--primary);
+  border-radius:var(--r-sm);padding:6px 8px;white-space:nowrap}
+.link:hover{background:rgba(255,255,255,.80);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.92)}
+/* 玻璃控件：同一套配方，但小元素要更实一点、边缘光更强，否则读不出"玻璃" */
+.pearl{background-color:var(--lg-tint-hi);background-image:var(--lg-sheen);
+  color:var(--ink-80);font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;
+  border:1px solid transparent;   /* 只留给 .arm 的状态提示，撑高度那圈走 --lg-ring */
+  border-radius:var(--r-md);
+  padding:10px 16px;white-space:nowrap;
+  box-shadow:var(--lg-spec),var(--lg-ring),var(--lg-lift-1)}
+.pearl:hover:not(:disabled){color:var(--ink);translate:0 -1px;
+  background-color:rgba(255,255,255,.94);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,1),var(--lg-ring),
+             0 3px 8px rgba(0,0,0,.05),
+             0 16px 36px rgba(0,0,0,.10)}
+.pearl.arm{color:var(--err-tx);border-color:rgba(255,59,48,.35);
+  box-shadow:var(--lg-spec),var(--lg-lift-1)}
+/* 危险动作 = 红调玻璃，与「接管 Edge」的蓝调玻璃**严格对称**：
+   同一个配方（6% 状态色底 + 42% 状态色边 + 状态色字），只换色相。
+   这样「停止」和「关闭控制台」一眼就是"会中断当前事情"的那一类，
+   又不会像实心红那样抢掉「开始刷课」（唯一的 Action Blue 主按钮）的注意力。
+   悬停加深到 .14 底 + 状态色投影 —— 和蓝调玻璃的 hover 数值一一对应。 */
+.pearl.stop,.pearl.quit{background-color:rgba(255,59,48,.06);background-image:var(--lg-sheen);
+  border-color:rgba(255,59,48,.42);color:var(--err-tx);
+  box-shadow:var(--lg-spec),var(--lg-ring),var(--lg-lift-1)}
+.pearl.stop:hover:not(:disabled),.pearl.quit:hover:not(:disabled){
+  background-color:rgba(255,59,48,.14);color:#a81b12;translate:0 -1px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.92),
+             0 3px 8px rgba(255,59,48,.10),
+             0 16px 36px rgba(255,59,48,.16)}
+.pearl.arm:disabled{color:var(--ink-48);border-color:var(--hairline)}
+/* 顶栏图标按钮：「如何使用」的图标形态，与「关闭控制台」并排 */
+.iconbtn{position:relative;display:grid;place-items:center;width:30px;height:30px;flex:0 0 auto;
+  border-radius:var(--r-pill);color:var(--ink-48);
+  /* 三层全透明占位：层数与 hover 态对齐，过渡才是"由无到有"地长出来，而不是跳出来 */
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0),
+             0 2px 6px rgba(0,0,0,0),
+             0 8px 20px rgba(0,0,0,0)}
+/* 最小点击区：可见尺寸只有 30px，用伪元素把命中区补到 40×40（密集桌面档的下限）。
+   只扩命中区不改外观；两侧各扩 5px，与相邻的「关闭控制台」之间仍留 4px，不会互相压叠。 */
+.iconbtn::after{content:"";position:absolute;left:50%;top:50%;translate:-50% -50%;
+  width:40px;height:40px}
+.iconbtn svg{width:17px;height:17px;display:block}
+.iconbtn:hover{background:rgba(255,255,255,.86);color:var(--ink);translate:0 -1px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,1),
+             0 2px 6px rgba(0,0,0,.05),
+             0 8px 20px rgba(0,0,0,.07)}
+/* 说明正在展开：图标亮成 Action Blue，暗示"再点一次就收回" */
+.iconbtn.on{color:var(--primary)}
+
+/* ---------- 胶囊弹窗 / 灵动岛（iOS 26 风格：深色玻璃 + 弹簧动效） ----------
+   定位原理（改了就会重新偏左 / 错位，务必先读完）：
+   岛是 .tb-in 里**居中的那个 flex 项**，左右两侧（品牌 / 操作区）都是 flex:1 1 0，
+   于是两侧轨道恒等宽 ⇒ 岛的中心 == 容器中心 == 屏幕中心，且收缩态与展开态
+   **共用同一套定位**，只过渡尺寸与圆角（旧版展开时改成 position:fixed 并同时换尺寸，
+   浏览器没有可插值的中间态，所以会硬跳一下 —— 那就是"点击后错位"）。
+   宽度上限 calc(100% - N px) 是安全阀：N = 2×(该断点下操作区实测宽) + 2×gap，
+   保证两侧轨道永远 ≥ 操作区宽度 ⇒ 岛既不压叠、又始终居中。
+   三条踩坑换来的规律：
+   1) 尺寸只走「长度 → 长度」通道：用 height 36px→auto（靠 :root 的 interpolate-size），
+      而不是靠 max-height 兜底 —— 后者在内容比它矮时看不见弹簧，Q弹就没了。
+   2) 深色玻璃不依赖 backdrop-filter：顶栏自身带 backdrop-filter 会形成 backdrop root，
+      岛在其内部几乎采不到背景内容，玻璃观感只能靠「层次 + 高光 + 投影」自己搭。
+      也正因为不依赖它，能力差的浏览器不会变成「字浮在空气里」。
+   3) 绝不动画 backdrop-filter 的模糊半径（每帧重新合成，帧率会掉到 30 以下）；
+      「动态模糊」用叠加层透明度交叉淡入来等价实现。 */
+.island{
+  position:relative;z-index:30;
+  flex:0 1 auto;min-width:0;align-self:flex-start;margin-top:8px;
+  transform-origin:top center;   /* 形变从顶边往下"荡"，和高度增长方向一致 */
+  /* 上限常数 = 2×(该断点下操作区**内容**实测最宽值) + 2×16(gap)：
+     >834px 操作区 303 → 640 ；641–834px 操作区 213 → 458 ；≤640px 操作区 125 → 282。
+     注意是"内容宽度"不是"轨道宽度"：操作区最宽的状态文案是「正在接管 Edge」(6 字)，
+     它会把 275 的轨道撑到 303，早期按 275 算过一次，结果岛被反压 12px。 */
+  max-width:min(620px,calc(100% - 640px));
+  display:flex;align-items:center;gap:10px;
+  /* 玻璃本体：深色半透 + 顶部高光渐变（属于材质构成，不是装饰性渐变）
+     高光收到 .10 且 44% 就散尽：宽而亮的白雾会把深色洗成灰，这正是旧版"脏"的第二个来源。
+     现在它读起来是"顶边被光打到的一道光"，而不是一层蒙在表面的雾。 */
+  background-color:rgba(var(--g-ink),.92);
+  background-image:linear-gradient(180deg,
+    rgba(255,255,255,.10) 0%,rgba(255,255,255,.03) 24%,rgba(255,255,255,0) 44%);
+  backdrop-filter:blur(12px) saturate(180%);
+  -webkit-backdrop-filter:blur(12px) saturate(180%);
+  border:1px solid rgba(255,255,255,.15);
+  /* 圆角刻意用**常量 18px**，不做 pill→18 的过渡。
+     收缩态高度正好 36px ⇒ 18px = 半高 ⇒ 浏览器渲染出来本来就是完美胶囊，
+     和 --r-pill 视觉等价。而一旦让它过渡，弹簧的过冲会冲过 18px 继续朝 0 去，
+     负圆角被钳成 0 —— 那一帧就是用户看到的"展开瞬间变方形"。 */
+  border-radius:var(--r-lg);
+  /* 四层合成玻璃厚度：顶部镜面高光 / 内底阴影 / 外部抬升 / 近处落影 */
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.16),
+             inset 0 -1px 1px rgba(0,0,0,.32),
+             0 8px 24px rgba(0,0,0,.22),
+             0 2px 6px rgba(0,0,0,.16);
+  color:rgba(255,255,255,.94);
+  height:36px;max-height:420px;          /* max-height 只是兜底：极端长文本不许撑出屏幕 */
+  padding:8px 16px;cursor:pointer;overflow:hidden;
+  font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;
+  /* 尺寸三条走 --spring-island（苹果风单峰回弹），时长 450ms；
+     颜色/阴影走 --ease-hover（两端缓的 S 形）—— 悬停直接复用 --ease 会读成"啪地切换"。
+     注意 translate / transform 也在这里收口（悬停抬起用 translate、按压用 transform，
+     两者是独立属性，互不覆盖，所以能各用各的曲线）。 */
+  transition:width .80s var(--spring-island),
+             height .80s var(--spring-island),
+             max-width .80s var(--spring-island),
+             padding .80s var(--spring-island),
+             background-color .3s var(--ease-hover),
+             border-color .3s var(--ease-hover),
+             box-shadow .3s var(--ease-hover),
+             translate .26s var(--ease-hover),
+             transform .2s var(--ease-hover);
+}
+/* 岛整块是可点击控件：里面的文字一律不可选中。
+   否则双击会选中半行字、按住拖动会变成划选 —— 选区会盖在文案上，连点时还会打断点击
+   （用户实报）。user-select 在部分内核里不严格继承，所以连子元素一起关掉。 */
+.island,.island *{-webkit-user-select:none;user-select:none}
+/* ---- 悬停：「被光照到」而不是「变深/变浅」（DESIGN.md §7.5）----
+   ::before 是悬停时亮起来的那层镜面：z-index:-1 让它落在玻璃体**之上**、
+   文字/按钮**之下**（父元素 z-index:30 建了层叠上下文，负 z-index 子层夹在
+   父背景之后与内容之前的那一格）。只动 opacity，不碰模糊半径。
+   之所以不用改 background-color 来做"提亮"：岛还有 .att / .err 两个强调底，
+   hover 改底色会把它们的暖/冷调盖掉；叠一层白光则三种底色都适用。 */
+.island::before{
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:-1;
+  background:linear-gradient(180deg,rgba(255,255,255,.12) 0%,rgba(255,255,255,.04) 42%,
+    rgba(255,255,255,0) 68%);
+  opacity:0;transition:opacity .3s var(--ease-hover);
+}
+/* 抬起只在**收缩态**做：展开态正在跑 islandPop 关键帧（那个也用 translate），
+   两边同时写 translate 会互相抢，动画结束回到 CSS 值的一瞬间会跳 1px。
+   展开态只加光与浮起 —— 那时鼠标本来就在岛上，再抬一下反而多余。 */
+.island:not(.big):hover{
+  translate:0 -1px;
+  border-color:rgba(255,255,255,.30);   /* 边缘亮线也提亮：这是"被光照到"里最易感知的一维 */
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.26),
+             inset 0 -1px 1px rgba(0,0,0,.34),
+             0 12px 30px rgba(0,0,0,.30),
+             0 3px 8px rgba(0,0,0,.20);
+}
+/* 强调态有自己的彩色边，hover 时按同样的色相提亮（否则会被上面的白光边盖掉）。
+   特异性 .island.att:not(.big):hover (0,4,0) > .island:not(.big):hover (0,3,0)。 */
+.island.att:not(.big):hover{border-color:rgba(255,159,10,.60)}
+.island.err:not(.big):hover{border-color:rgba(255,69,58,.60)}
+.island:not(.big):hover::before{opacity:1}
+.island.big:hover{box-shadow:inset 0 1px 0 rgba(255,255,255,.26),
+             inset 0 -1px 1px rgba(0,0,0,.34),
+             0 12px 30px rgba(0,0,0,.28),
+             0 3px 8px rgba(0,0,0,.19)}
+.island.big:hover::before{opacity:.55}
+/* 按压：立刻响应（陡曲线），只缩放不动 translate，所以和"抬起"不打架 */
+.island:not(.big):active{transform:scale(.982);transition-duration:.1s}
+.island:focus-visible{outline:2px solid var(--g-rise);outline-offset:2px}
+/* 「模糊涌上来」的低成本替代：展开时叠一层柔光淡入，只动 opacity，不动模糊半径 */
+.island::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:-1;
+  background:radial-gradient(140% 130% at 50% -40%,rgba(255,255,255,.20),rgba(255,255,255,0) 58%);
+  opacity:0;transition:opacity .5s var(--ease);
+}
+.island.big::after{opacity:1}
+.island .itexts{display:block;min-width:0;overflow:hidden;flex:1 1 auto}
+.island .itext{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  min-width:0;font-variant-numeric:tabular-nums}
+/* ↑ tabular-nums 是必须的：岛里的「第 7/24 讲 · 38%」「6:52 / 18:00」每 3 秒就变一次，
+   比例数字宽度不等 → 整块岛会跟着一抖一抖地改宽度。 */
+/* ---- 岛内文本按「段」渲染（2026-09-16）----
+   用户实报：进度刷新时"明明只有数字变，却整行字都动一次"。
+   原因是旧版每次把整行字符串塞进一个文本节点，任何一位数字变了都算"整行变了"，
+   于是整行重播 swap 动画。现在把一行拆成若干 .sg：
+     · 只有内容真的变了的段才更新 DOM、才播 tick
+     · 讲次/状态这类"骨架段"变了才算整行切换 → 才走 swap 分镜
+   这样同一讲里 38% → 41%，动的只有那三个数字。
+   必须 inline-block：transform/filter 对 display:inline 的元素无效。 */
+/* 分隔段要 white-space:pre：分隔符的文案是 `' · '`（两侧带空格），而行盒首尾的
+   空白在正常情况下会被浏览器折叠掉 —— 结果渲染成「第 7/24 讲·2.3 浮点数」，
+   两边挤在一起（截图里发现的）。pre 只加在 sep 段上，不波及讲名：
+   讲名长的时候还得能在展开态换行。 */
+.island .itext .sg{display:inline-block;vertical-align:baseline}
+.island .itext .sg[data-k^="sep"]{white-space:pre}
+.island .itext .sg.tick{animation:segTick .3s var(--ease-hover) both}
+/* 一镜到底期间不许段动画：盒子在长大/缩小的同时，字再上跳 + 模糊一次，
+   两套运动叠在同一行字上 = "字体抽搐"。此时内容的变化由"被圆角边缘揭开"承担。 */
+.island.morphing .itext .sg.tick{animation:none}
+@keyframes segTick{
+  from{opacity:.32;transform:translateY(-.34em);filter:blur(1.2px)}
+  to{opacity:1;transform:none;filter:blur(0)}
+}
+/* ---- 运动模糊：只给**新出现的东西**（2026-10-19 修正）----
+   红线：**绝不动画 backdrop-filter 的模糊半径**（每帧重新合成，帧率掉到 30 以下）。
+   ⚠ 上一版这里把 `.itexts` 也挂上了：展开/收起时整段文字会 3px 模糊再对焦。
+     几何本身已经在一镜到底里演了，字再糊一次就是"字体抽搐"（用户实报）。
+     文字是**同一个物体**在变长变短，不该重新对焦；只有按钮行是真正新出现的，
+     才配得上这一下模糊。 */
+.island.big .iacts{animation:none}
+@keyframes islandFocus{
+  from{filter:blur(3px);opacity:.4}
+  to{filter:blur(0);opacity:1}
+}
+.island .ibar{width:56px;height:4px;border-radius:var(--r-pill);
+  background:rgba(255,255,255,.20);flex:0 0 auto;overflow:hidden}
+.island .ibar i{display:block;height:100%;width:0;background:var(--g-rise);
+  transition:width .5s var(--ease)}
+.island .iacts{display:none;gap:8px;flex:0 0 auto}
+/* 深色底上的状态点：沿用 HIG 系统色的暗色变体，保证在黑玻璃上够亮 */
+.island .sdot{background:rgba(255,255,255,.42)}
+.island .sdot.run{background:var(--g-rise)}
+.island .sdot.ok{background:var(--g-ok)}
+.island .sdot.warn{background:var(--g-warn)}
+.island .sdot.err{background:var(--g-err)}
+/* 展开/通知态：定位与收缩态完全相同，只是长大成人 —— 这是不错位的关键
+   （height:auto 能参与过渡，靠的是 :root 上的 interpolate-size；不支持时会退化成
+     瞬时切换，但尺寸以外的通道照常动，所以不会坏） */
+.island.big{
+  height:auto;min-height:44px;max-width:min(700px,calc(100% - 640px));
+  border-radius:var(--island-corner);
+  padding:12px 16px;align-items:flex-start;gap:10px;
+  flex-wrap:wrap;
+  cursor:default;
+  background-color:rgba(var(--g-ink),.94);
+  /* 时长刻意压到 .45s（和 --spring-island 同步）：关键帧动画不可打断，窗口越短越好。
+     尺寸那几条通道走的是 transition（可打断），所以哪怕中途又点一下，
+     几何也会立刻改向，只是这一下 pop 被掐掉 —— 不会留下错位。 */
+  /* 不叠 scale 关键帧：整岛缩放会让文字逐帧重新采样 = 字在抖。弹性由尺寸弹簧提供。 */
+}
+/* 展开时的「弹性形变」：尺寸交互由 height / max-width 的弹簧负责，这一层只补物理感 ——
+   从上方轻轻落下 + 先压扁再回弹，两次可见震荡。
+   为什么用下坠而不是等比放大：放大 4% 会让宽度也涨 4%，在极窄窗口下可能压到两侧的
+   操作区；下坠只动 y 轴，零碰撞风险，物理感还更足。
+   关键帧的 timing-function 用 linear，这样百分比就直接等于时间轴，不会被缓动二次扭曲。 */
+@keyframes islandPop{
+  0%{translate:0 -4px;transform:scale(.975)}
+  32%{translate:0 1.1px;transform:scale(1.015)}
+  56%{translate:0 -.5px;transform:scale(.995)}
+  78%{translate:0 .18px;transform:scale(1.003)}
+  100%{translate:0 0;transform:scale(1)}
+}
+.island.big .itexts{min-width:0}
+.island.big .itext{white-space:normal;line-height:1.43}
+/* 动作按钮**独占一行、右对齐**：和文字同排时它只能吊在文字顶部，位置还会随着
+   文案长短上下漂移，看着不美。独占一行后位置恒定，也给了它足够大的点击区域。 */
+.island.big .iacts{display:flex;flex:1 1 100%;justify-content:flex-end;gap:8px}
+/* 没有动作按钮时别留着空容器：它在 .big 下仍是 flex，会白占一整行 */
+.island .iacts:empty{display:none}
+/* ---- 一镜到底的"舞台"（JS 只在过渡期间挂 .morphing，平时一帧都不生效）----
+   孩子在过渡期间脱离文档流、按**终态布局**绝对定位：宽度/左右一步到位（所以文字
+   中途绝不换行、绝不重排），只有 top 跟着同一条弹簧走。岛的宽高由 JS 锁成 px。
+   于是：老内容被圆角边缘吃掉、新内容被"揭开"，标和文字随岛的左边缘一起移动。 */
+.island.morphing{position:relative}
+.island.morphing>*{position:absolute;transition:top .22s var(--ease-hover),
+                                               opacity .28s var(--ease-hover)}
+/* 位移是跟着岛左边缘的**布局**走的，每一帧都落在新的亚像素坐标上；
+   不提升图层的话浏览器会逐帧重新栅格化字形（小幅抖动）。提升之后字形只栅格化一次，
+   位置由合成器更新。只在 520ms 的过渡期间挂，平时零开销。 */
+.island.morphing .itexts,.island.morphing .idot{transform:translateZ(0)}
+
+/* 展开：进度条让位给"已看 12:03 / 45:00"；收起：按钮行被面板盖住。两边都先淡出。
+   ⚠ 这两条必须挂在 .go 上（JS 在"目标帧"才加），不能只看 .morphing：
+     舞台的起态阶段孩子统一 transition:none，类一挂上就按 0 计算 —— 结果是瞬切
+     （收起第一帧按钮直接消失、进度条直接冒出来），和展开的淡出不对称。
+     加上 .go 之后，起态保持原样，进入目标帧才触发过渡。 */
+.island.morphing.go.big .ibar{opacity:0}
+.island.morphing.go:not(.big) .iacts{opacity:0}
+/* 收起：与展开的 islandPop 反向对称 —— 先轻轻一沉，再收住（同一时长、同一条 linear 时间轴） */
+.island.closing{/* 同上：不再叠 scale 形变 */}
+@keyframes islandSink{
+  0%{translate:0 0;transform:scale(1)}
+  30%{translate:0 1.2px;transform:scale(.988)}
+  60%{translate:0 -.4px;transform:scale(1.004)}
+  82%{translate:0 .15px;transform:scale(.999)}
+  100%{translate:0 0;transform:scale(1)}
+}
+/* 强调底：深色玻璃的暖/冷两档（对应原来的浅色 att / err）
+   不透明度跟着本体一起提到 .90：原来 .84 的暖调压在浅底上合成 #5E4B30（泥棕），
+   提到 .90 之后是 #443620（琥珀黑），同样是"脏"的修法 —— 提高不透明度比加饱和度管用。 */
+.island.att{background-color:rgba(48,32,8,.90);border-color:rgba(255,159,10,.42)}
+.island.att .itext{color:#ffd08a}
+.island.err{background-color:rgba(54,16,14,.90);border-color:rgba(255,69,58,.42)}
+.island.err .itext{color:#ffb0aa}
+.island.big .idot{margin-top:5px}
+/* 弹窗内的小按钮：暗底实心 / 描边（沿用 DESIGN.md 已登记的 Action Blue 暗色变体） */
+.mini{font:400 14px/1.29 var(--f-text);letter-spacing:-.224px;color:#fff;
+  background:var(--g-fill);border-radius:var(--r-pill);padding:7px 14px;white-space:nowrap;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 4px 12px rgba(0,0,0,.28);
+  position:relative}
+/* 岛内按钮可见高度只有 32px，命中区补到 40px（纵向各扩 4px，落在岛的 12px 内边距里，
+   不会被 .island 的 overflow:hidden 裁掉，也不会和相邻按钮重叠）。 */
+.mini::after{content:"";position:absolute;left:0;right:0;top:50%;translate:0 -50%;height:40px}
+.mini:hover{background:#0084ff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 8px 20px rgba(0,0,0,.38)}
+.mini.ghost{background:none;color:var(--g-rise);padding:7px 10px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0)}   /* 占位，层数与 hover 对齐 */
+.mini.ghost:hover{background:rgba(255,255,255,.16);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18)}
+/* 悬停 / 按压的过渡通道统一收口在**文件末尾**（各组件规则之后），
+   因为 transition 是单值属性：写在这里会被下面所有组件规则逐条盖掉。
+   按下这一下刻意用陡的 --ease：按下要的就是"立刻响应"，缓了反而显得迟钝。
+   幅度取 0.96（make-interfaces-feel-better 的既定值：低于 0.95 会显得夸张）。
+   灵动岛刻意不参与缩放 —— 它的交互反馈由「展开 / 收起」的尺寸弹簧承担，
+   再叠一层缩放会和尺寸过渡抢同一个时间轴，反而显得毛躁。 */
+button:active:not(:disabled){transform:scale(.96);
+  transition-duration:.1s;transition-timing-function:var(--ease)}
+.enter{animation:enter .45s var(--ease) both}
+.swap{animation:swap .3s var(--ease) both}
+@keyframes enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* swap = 整行换内容（换讲/换状态）时分镜。加一点模糊 = 运动模糊，
+   和展开时的 islandFocus 是同一种读感（内容"对焦"上来）。 */
+@keyframes swap{from{opacity:0;transform:translateY(-4px);filter:blur(2px)}
+  to{opacity:1;transform:none;filter:blur(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes pop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+/* 待办步骤的呼吸提示：只动 background / opacity（规范禁止给 chrome 加阴影） */
+@keyframes ring{0%,100%{background:var(--primary)}50%{background:#4d9fe0}}
+
+/* ---------- 主体：左操作 / 右看板 ---------- */
+.wrap{max-width:1200px;margin:0 auto;padding:var(--s7) 24px var(--s8)}
+.layout{display:grid;grid-template-columns:380px minmax(0,1fr);gap:var(--s5);align-items:start}
+.ops{padding-top:var(--s3)}
+.eyebrow{font:400 12px/1 var(--f-text);letter-spacing:-.12px;color:var(--ink-48);margin-bottom:10px}
+/* 光学对齐（2026-10-19 实测量出来的，不是口诀）：
+   40px 的大字号首字「自」的墨迹起点比 12/28px 那几行**偏右 3px**
+   （`_verify_optical.py` 像素扫描：小字组全部落在 65.00，H1 落在 68.00）。
+   字身留白（side bearing）按字号等比放大，盒子左边线相同、眼睛看到的起点不同 ——
+   教科书里的"外挂边距"就是这个。补 -3px 之后墨迹才对到同一条线上。 */
+.h1{font:600 40px/1.1 var(--f-disp);letter-spacing:0;margin-bottom:var(--s3);margin-left:-3px}
+.lead{font:400 28px/1.14 var(--f-disp);letter-spacing:.196px;color:var(--ink-80);margin-bottom:var(--s7)}
+.lead em{font-style:normal;font-weight:600}
+
+/* 三步引导 */
+/* 运行中把"三步引导"收起来。
+   它是开机向导：四步都做完之后，那四条对勾就变成了纯占地方（用户实报"单调、重复"——
+   页面一半面积在反复告诉你"已经做完了"）。收起来用的是和折叠清单同一条曲线
+   （height auto↔0 + --ease-hover），不是 display 硬切。 */
+/* 四步引导（2026-10-19 重做：用户实报「太影响整体美观」）。
+   四条全列出来时占左栏近 300px，而其中三条永远只是"做完了"的复述。
+   现在只把**下一步**留在页面上，已完成的部分收成一根 2px 的四段进度线 ——
+   正好接上「一根线」的母题（顶栏 3px / 仪表 14px / 清单 2px / 这里 2px）。 */
+.steps{display:block;margin-bottom:var(--s5);overflow:hidden;position:relative;
+  transition:height .34s var(--ease-hover),opacity .24s var(--ease-hover),
+             margin-bottom .34s var(--ease-hover)}
+/* 四段进度线的底轨 + 填充（r75）：填充是实体元素、走 width 过渡 ——
+   原来把 --sp 写进 gradient 断点，断点本身不可动画，每次步进都是瞬跳。 */
+.steps::before{content:"";display:block;height:2px;border-radius:var(--r-pill);
+  margin-bottom:14px;
+  background:rgba(0,0,0,.08)}
+.steps .spfill{position:absolute;left:0;top:0;height:2px;width:var(--sp,0%);
+  border-radius:var(--r-pill);background:var(--primary);list-style:none;
+  transition:width .5s var(--ease-hover)}
+.steps::after{content:"第 " attr(data-n) " 步 / 4";display:block;margin-top:9px;
+  font:400 12px/1.4 var(--f-text);letter-spacing:-.12px;color:var(--ink-48)}
+.steps .step{display:none}
+.steps .step.now{display:flex}
+.ops.live .steps{height:0;opacity:0;margin-bottom:0}
+.step{display:flex;gap:14px;align-items:flex-start;color:var(--ink-48)}
+.step .sn{flex:0 0 auto;width:32px;height:32px;border-radius:var(--r-pill);
+  display:grid;place-items:center;
+  background-color:var(--lg-tint-hi);background-image:var(--lg-sheen);
+  border:1px solid transparent;   /* 只留给 .done / .now 的状态色 */
+  box-shadow:var(--lg-spec),var(--lg-ring);
+  font:400 14px/1 var(--f-text);font-variant-numeric:tabular-nums;color:var(--ink-48)}
+.step .stx b{display:block;font:400 17px/1.24 var(--f-text);letter-spacing:-.374px;color:var(--ink-48)}
+.step .stx span{font:400 14px/1.43 var(--f-text);letter-spacing:-.224px}
+.step.done .sn{background-image:none;background-color:var(--lg-ok-t);
+  border-color:transparent;color:var(--ok-tx);box-shadow:none}
+.step.done .stx b{color:var(--ink)}
+/* 「进行中」的蓝色徽标：box-shadow 必须清零。
+   基准态的玻璃高光（--lg-spec 顶部 1px 白线 + --lg-ring 内缩 1px 灰圈）落在蓝底上，
+   会读成"外圈和蓝色填充没对齐"—— 顶部一条白弧、里面一圈灰线（用户实拍反馈）。
+   done 态同样清零（见上），两种状态徽标都应该是干净的实心圆。 */
+.step.now .sn{background:var(--primary);border-color:var(--primary);color:var(--on-primary);
+  /* 数字在圆里按几何居中会读成"偏低"约 1px（圆形的视觉中心比几何中心高）。
+     只给"现在是数字"的这一步加 2px 下内边距 → 格心在内容盒里上移 1px。 */
+  padding-bottom:2px;
+  box-shadow:none;animation:ring 2.4s var(--ease) infinite}
+.step.now .stx b{color:var(--ink);font-weight:600}
+.step.done .stx b{font-weight:600}
+
+/* CTA 区 */
+.ctas{display:flex;flex-direction:column;gap:var(--s3);margin-bottom:var(--s7)}
+/* 主 CTA：全页唯一的实心强调色，是层级锚点 —— 不能也做成玻璃，
+   否则整页没有"最重的那个点"。但它加上与玻璃同族的顶部镜面 + 一点品牌色浮起，
+   和玻璃控件属于同一个光环境。 */
+/* 图标与文案的 gap 取 5 而不是 10：播放三角是**填充图形**，墨迹比 18px 的槽位窄得多，
+   10px 的几何间距实测读成 15px（`_verify_optical.py` 主按钮那行）。收到 5 才等于看起来的 10。 */
+.hero{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;
+  background:var(--primary);color:var(--on-primary);
+  font:300 18px/1 var(--f-text);letter-spacing:0;
+  border-radius:var(--r-pill);padding:16px 28px;min-height:56px;
+  /* 阴影层数与 hover 态**严格对齐**（inset / 近影 / 远影 三层）：
+     box-shadow 是逐项插值的，两边层数不同要靠"补透明影子"对齐，
+     过渡中间就会短暂冒出一层本不该存在的影，看着像抖了一下。 */
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.26),
+             0 3px 8px rgba(0,102,204,.12),
+             0 6px 20px rgba(0,102,204,.22);
+  transition:background-color .2s var(--ease)}
+/* 悬停：提亮（不是压暗）+ 抬起 1px + 品牌色浮起加深 —— 像被光照到 */
+.hero:hover:not(:disabled){background:#0071e3;translate:0 -1px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.46),
+             0 3px 8px rgba(0,102,204,.20),
+             0 14px 32px rgba(0,102,204,.30)}
+.hero svg{width:18px;height:18px;flex:0 0 auto}
+/* 禁用态阴影与基准态**层数对齐、颜色归零**：box-shadow 逐项插值需要等长列表，
+   写 none 会从“三层影”瞬跳成“无影”。灰板淡入淡出才完整（r75）。 */
+.hero:disabled{background:var(--chip);color:var(--ink-48);cursor:default;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0),
+             0 3px 8px rgba(0,102,204,0),
+             0 6px 20px rgba(0,102,204,0)}
+.hero.loading:disabled{background:var(--primary);color:var(--on-primary)}
+/* 图标 ↔ 转圈：同一槽位交叉淡入（scale .25→1、blur 4px→0、cubic-bezier(.2,0,0,1)）。
+   两者都在 DOM 里、绝对定位重叠，所以宽度不变，文案不会挪位。 */
+.hero .hic{position:relative;width:18px;height:18px;flex:0 0 auto;display:grid;place-items:center}
+.hero .ic,.hero .spin{position:absolute}
+.hero .ic{width:18px;height:18px;
+  transition:opacity .28s cubic-bezier(.2,0,0,1),
+             scale .28s cubic-bezier(.2,0,0,1),
+             filter .28s cubic-bezier(.2,0,0,1)}
+.hero .spin{width:16px;height:16px;border-radius:var(--r-pill);
+  border:2px solid rgba(255,255,255,.4);border-top-color:#fff;
+  opacity:0;scale:.25;filter:blur(4px);
+  transition:opacity .28s cubic-bezier(.2,0,0,1),
+             scale .28s cubic-bezier(.2,0,0,1),
+             filter .28s cubic-bezier(.2,0,0,1)}
+/* 转圈只在真的在转的时候才跑动画：常驻会白白每帧合成一个看不见的元素 */
+.hero.loading .spin{opacity:1;scale:1;filter:blur(0);animation:spin .8s linear infinite}
+.hero.loading .ic{opacity:0;scale:.25;filter:blur(4px)}
+/* 成功勾（r75，移植 motion-prompt #160 Loading button 的完成段：
+   MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#160）——
+   同一槽位交叉淡入 + 描线画出（.34s cubic-bezier(.2,.8,.2,1)），1.6s 后自动让位回播放键。 */
+.hero .ck{position:absolute;width:18px;height:18px;opacity:0;scale:.25;filter:blur(4px);
+  transition:opacity .28s cubic-bezier(.2,0,0,1),
+             scale .28s cubic-bezier(.2,0,0,1),
+             filter .28s cubic-bezier(.2,0,0,1)}
+.hero .ck path{stroke-dasharray:1;stroke-dashoffset:1}
+.hero.ok .ck{opacity:1;scale:1;filter:blur(0)}
+.hero.ok .ck path{animation:ckDraw .34s .05s cubic-bezier(.2,.8,.2,1) forwards}
+.hero.ok .ic,.hero.ok .spin{opacity:0;scale:.25;filter:blur(4px);animation:none}
+@keyframes ckDraw{to{stroke-dashoffset:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ctas .row{display:flex;gap:var(--s3)}
+.ctas .row>*{flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;
+  gap:8px;min-height:48px;border-radius:var(--r-pill)}
+/* 「接管 Edge」：蓝调玻璃 —— 玻璃配方 + 品牌色半透，边界靠蓝色的边勾出来 */
+.ghostpill{background-color:rgba(0,102,204,.06);background-image:var(--lg-sheen);
+  border:1px solid rgba(0,102,204,.42);color:var(--primary);
+  box-shadow:var(--lg-spec),var(--lg-lift-1);
+  font:400 17px/1.47 var(--f-text);letter-spacing:-.374px;
+  transition:background-color .2s var(--ease)}
+.ghostpill:hover:not(:disabled){background-color:rgba(0,102,204,.14);translate:0 -1px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.92),
+             0 3px 8px rgba(0,102,204,.10),
+             0 14px 32px rgba(0,102,204,.16)}
+.ghostpill:disabled,.pearl:disabled{color:var(--ink-48);border-color:var(--hairline);
+  cursor:default;background-color:transparent;background-image:none;box-shadow:none}
+.ctas .row .pearl{padding:8px 16px}
+/* 刷课范围（玻璃芯片） */
+.range{position:relative;margin-bottom:var(--s5)}
+/* 范围芯片与「重新识别」并排，所以包一层 .rrow。
+   ⚠ 下拉菜单是绝对定位（top:calc(100%+8px)），锚点必须跟着挪到 .rrow 上 ——
+   留在 .range 里的话，"100%"会指到下面那行提示文字的下方，菜单跑到看不见的地方去。 */
+.rrow{position:relative;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* 光学校准：刷新图标（24 视框缩到 12px）的墨迹比它的盒子窄 2px，
+   8px 的几何间距实测读成 10px，所以这颗芯片单独收到 6。 */
+#btnScan{gap:6px}
+/* 刷新图标与旁边的 caret 同尺寸同描边（24 视框缩到 12px ⇒ 写 2.2，渲染出来 1.1px，
+   两者一致；同一图标集只能有一个渲染描边粗细）。 */
+.chipbtn .ric{width:12px;height:12px;flex:0 0 auto}
+.rlabel{display:block;font:400 12px/1 var(--f-text);letter-spacing:-.12px;color:var(--ink-48);margin-bottom:10px}
+.chipbtn{display:inline-flex;align-items:center;gap:8px;
+  background-color:var(--lg-tint-hi);background-image:var(--lg-sheen);
+  border:1px solid transparent;   /* 默认透明，hover 时变蓝 = 状态提示 */
+  border-radius:var(--r-pill);
+  /* 左右刻意不等：内容最右边是 caret（细尖角、右侧留白大），
+     等内边距会让整组内容在视觉上偏左 1.8px（实测 17.5 / 19.3）。左 17 右 15 之后等距。 */
+  padding:12px 15px 12px 17px;
+  box-shadow:var(--lg-spec),var(--lg-ring),var(--lg-lift-1);
+  font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;max-width:100%;
+  transition:border-color .2s var(--ease)}
+.chipbtn:hover:not(:disabled){border-color:rgba(0,102,204,.50);translate:0 -1px;
+  background-color:rgba(255,255,255,.94);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,1),var(--lg-ring),
+             0 3px 8px rgba(0,0,0,.05),
+             0 16px 36px rgba(0,0,0,.10)}
+.chipbtn:disabled{color:var(--ink-48);background-color:transparent;background-image:none;
+  border-color:var(--hairline);cursor:default;box-shadow:none}
+.chipbtn .txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chipbtn .caret{width:12px;height:12px;flex:0 0 auto;transition:transform .4s var(--spring-press)}
+.chipbtn.open .caret{transform:rotate(180deg)}
+/* 下拉菜单：全页第二块**真玻璃**（浮在内容之上，底下确实有东西可以透/糊）。
+   也是三块真玻璃里唯一"半透"能被肉眼读出来的地方，所以这里值得花 backdrop-filter。
+   内边距取 7px 而不是 8px，是为了同心圆角：outer(18) = inner(11) + padding ⇒ 7px。
+   差这 1px 时，选中项（--r-md = 11px）的圆角和外框不平行，整块菜单会显得"歪"。 */
+.menu{position:absolute;left:0;top:calc(100% + 8px);width:min(320px,100%);
+  background-color:rgba(255,255,255,.72);background-image:var(--lg-sheen);
+  backdrop-filter:var(--lg-blur);-webkit-backdrop-filter:var(--lg-blur);
+  border-radius:var(--r-lg);
+  padding:7px;z-index:60;max-height:320px;overflow:auto;
+  box-shadow:var(--lg-spec),var(--lg-ring),var(--lg-inner),var(--lg-lift-2);
+  transform-origin:top center;
+  opacity:0;transform:translateY(-6px) scale(.96);pointer-events:none;
+  transition:opacity .15s var(--ease),transform .15s var(--ease)}
+/* 进慢出快：展开走弹簧（.45s），收起走 .15s —— iOS 弹层的节奏 */
+.menu.open{opacity:1;transform:none;pointer-events:auto;
+  transition:opacity .18s var(--ease),transform .45s var(--spring-press)}
+.mitem{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:10px 12px;border-radius:var(--r-md);font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;
+  transition:background-color .18s var(--ease)}
+/* 菜单项不抬起（菜单里元素乱动会显得毛躁），只"被照亮" */
+/* 悬停 = 中性灰调。
+   以前是 rgba(255,255,255,.80) —— 菜单本身就是 .72 的白玻璃，白上叠白几乎不可见
+   （用户实测反馈"太淡了"）。iOS 的行高亮用的是 systemFill（中性灰 ~14%），
+   在白玻璃上清晰可辨，又不会和「选中」的蓝调打架 —— 选中仍由 .on 的
+   蓝底 + 蓝色描边独占。inset 高光保留，读起来仍是"被光照到"。
+   注意不能用蓝色：那会和 .on 混淆，用户就分不清"悬停"和"已选中"了。 */
+.mitem:hover{background:rgba(120,120,128,.20);color:var(--ink);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.92)}
+.mitem .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mitem .n{margin-left:auto;color:var(--ink-48);font:400 12px/1 var(--f-text);white-space:nowrap}
+.mitem .chk{width:14px;height:14px;flex:0 0 auto;color:var(--primary);opacity:0;
+  transform:scale(.4);transition:opacity .16s var(--ease),transform .32s var(--spring-press)}
+.mitem .chk svg{width:100%;height:100%;display:block}
+.mitem.on{background:var(--acc-t);outline:2px solid var(--primary-focus);outline-offset:-2px}
+.mitem.on .chk{opacity:1;transform:scale(1)}
+/* 菜单行错峰入场（r79）：只让当前可见行依次落下，视口外的行保持终态。
+   ⚠ 这条必须放在 .mitem 基础规则之后——工装 rule() 按首次 ".mitem{" 定位。 */
+.menu.open .mitem.vin{animation:mrowIn .3s var(--ease) both;animation-delay:calc(var(--mi,0)*26ms)}
+@keyframes mrowIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.rhint{font:400 12px/1.5 var(--f-text);letter-spacing:-.12px;color:var(--ink-48);margin-top:10px;
+  font-variant-numeric:tabular-nums}   /* 里面带「识别于 23:30」 */
+.rhint:empty{display:none}
+
+/* 如何使用（默认折叠） */
+.how{border-top:1px solid rgba(0,0,0,.05);padding-top:var(--s4)}
+.how summary{font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;color:var(--primary);
+  cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}
+.how summary::-webkit-details-marker{display:none}
+/* 注意 display:inline-block 是必须的：transform 对非替换行内元素不生效，
+   缺了它这个 caret 的旋转动画其实一直是坏的 */
+.how summary::after{content:"›";font-size:17px;display:inline-block;transform-origin:center;
+  transition:transform .4s var(--spring-press),translate .26s var(--ease-hover)}
+.how summary:hover{color:#0055ad}
+.how summary:hover::after{translate:2px 0}
+.how[open] summary::after{transform:rotate(90deg)}
+/* 展开时列表淡入。用 @starting-style 而不是 animation：前者若没触发就完全无副作用，
+   后者一旦没触发、配上 fill-mode:both 会把内容永久留在 opacity:0 —— 不值得冒这个险。 */
+.how ol,.how .tiny{transition:opacity .3s var(--ease),transform .3s var(--ease)}
+@starting-style{.how ol,.how .tiny{opacity:0;transform:translateY(-4px)}}
+.how ol{margin-top:var(--s4);display:flex;flex-direction:column;gap:10px;
+  font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;color:var(--ink-80)}
+.how ol li{padding-left:20px;position:relative}
+.how ol li::before{content:"·";position:absolute;left:6px;color:var(--ink-48)}
+.how .tiny{margin-top:var(--s4);font:400 12px/1.5 var(--f-text);color:var(--ink-48)}
+
+/* ---------- 右栏卡片：液态玻璃板（浅色档） ----------
+   玻璃感靠四件事一起成立，缺一件就退化成白板：
+   ① 半透本体（下面是环境光场，不是纯色）
+   ② 真 backdrop-filter 把背景的光糊开 —— 底下是平滑的光场，糊开本身变化不大，
+      但它让"玻璃"是真的玻璃：内容一旦滚到卡片后面就会透出来
+   ③ 顶部镜面 + 外轮廓 + 内底，把表面"切"出来
+   ④ 极柔的外浮起，把卡片从底板上抬起来
+   浮起刻意做得很轻：卡片是最底层的结构玻璃，重了就会和菜单/灵动岛抢层级。 */
+.board{display:flex;flex-direction:column;gap:var(--s5);min-width:0}
+.panel{
+  position:relative;
+  background-color:var(--lg-tint);background-image:var(--lg-sheen);
+  backdrop-filter:var(--lg-blur);-webkit-backdrop-filter:var(--lg-blur);
+  border-radius:var(--r-lg);
+  padding:var(--s5);min-width:0;
+  box-shadow:var(--lg-spec),var(--lg-ring),var(--lg-inner),var(--lg-lift-panel);
+  animation:panelIn .55s cubic-bezier(.34,1.4,.5,1) backwards}
+.panel:nth-child(2){animation-delay:.06s}
+.panel:nth-child(3){animation-delay:.12s}
+/* 面板入场：轻微放大 + 上浮（关键帧里不能用 linear()，太长且不可打断） */
+@keyframes panelIn{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+.pgrow{display:flex;align-items:baseline;gap:10px}
+/* 同上：40px 的数字起首（"38%"）比中文起首的行偏右 2px（实测 495 vs 493）——
+   数字字形的左侧留白，大字号下就成了肉眼可见的错位。
+   字号提到 56：它是整页唯一的"读数"，40px 还只是"一段大字"。
+   百分比符号单独降一档并上提（见 .pnum .pu）—— 同字号并排时 "%" 会抢走数字的重量。 */
+.pnum{font:600 56px/1.04 var(--f-disp);letter-spacing:-1px;font-variant-numeric:tabular-nums;
+  margin-left:-2px}
+.pnum .pu{font:500 22px/1 var(--f-disp);letter-spacing:0;margin-left:2px;
+  vertical-align:.62em;color:rgba(255,255,255,.72)}
+.pden{font:400 17px/1.47 var(--f-text);color:var(--ink-48)}
+.pgcap{font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;color:var(--ink-48);margin-top:6px}
+/* 进度槽做成"玻璃上刻出来的一道凹槽"：内阴影 + 半透深色，而不是一块实心灰 */
+.track{height:8px;border-radius:var(--r-pill);margin:var(--s4) 0 var(--s3);overflow:hidden;
+  background:rgba(0,0,0,.05);box-shadow:inset 0 1px 2px rgba(0,0,0,.07)}
+.track i{display:block;height:100%;width:0;background:var(--primary);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.3);
+  transition:width .6s var(--ease)}
+.track.live i{animation:barGlow 2.6s var(--ease) infinite}
+@keyframes barGlow{0%,100%{opacity:1}50%{opacity:.72}}
+.curline{font:400 17px/1.24 var(--f-text);letter-spacing:-.374px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pgmeta{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;
+  font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;color:var(--ink-48)}
+.pgmeta b{color:var(--ink);font-weight:600}
+.tag{display:inline-block;background:rgba(0,0,0,.05);color:var(--ink-48);border-radius:var(--r-xs);
+  padding:2px 7px;font:400 12px/1.3 var(--f-text);letter-spacing:-.08px;margin-right:6px;
+  font-variant-numeric:tabular-nums}   /* 里面是「第 7/24 讲」，会随刷课进度变 */
+.tag.acc{background:var(--acc-t);color:var(--primary)}
+
+/* ---------- 深色仪表：右栏第一块卡（2026-10-19 新增） ----------
+   它是"当前讲进度"的载体，也是这一页的视觉主角 —— 用户实报"太平淡、没有眼前一亮"，
+   根因是整页只有"白底 + 灰字 + 白卡片"三件套，**同一档明度重复三遍**。
+   这里引入全页唯一的结构性深色：浅色页面里出现一块有重量、有厚度、有光的深色材质，
+   层次与高级感立刻成立；而主数字放在深底上**对比度反而更高**——这是净赚的清晰度。
+   材质与灵动岛**同源**（同一套六层、同一个 --g-ink），但：
+     ① 不挂 backdrop-filter：全页"真模糊 4 处"是既有契约，深色档本来也不靠它；
+     ② 浮起仍是 --lg-lift-1：--lg-lift-2 属于菜单/浮层那一档，动了会破坏 §7.4 的阶梯。
+   不透明度取 .96 而不是岛的 .92：卡片面积大得多，越透越容易读成"深灰板"而不是"黑玻璃"。 */
+.panel.dark{
+  background-color:rgba(var(--g-ink),.96);
+  background-image:linear-gradient(180deg,
+    rgba(255,255,255,.09) 0%,rgba(255,255,255,.025) 22%,rgba(255,255,255,0) 46%);
+  color:rgba(255,255,255,.94);
+  /* 层数与基准一致（镜面 / 内底 / 远影 / 近影），hover 只改数值不改层数 ——
+     层数不同的时候浏览器会补透明影，过渡中间会冒出一层本不该存在的影。 */
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14),
+             inset 0 -1px 1px rgba(0,0,0,.34),
+             0 10px 30px rgba(0,0,0,.26),
+             0 2px 8px rgba(0,0,0,.18);
+  transition:box-shadow .34s var(--ease-hover);
+}
+/* 悬停 = "被光照到"（§7.5 那条通用规律），不抬起、不改尺寸。 */
+.panel.dark:hover{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),
+             inset 0 -1px 1px rgba(0,0,0,.36),
+             0 16px 40px rgba(0,0,0,.32),
+             0 3px 10px rgba(0,0,0,.20);
+}
+/* 深底上的文字层级：副文本一律 ≥ .62 —— 这是 AA 的底线，
+   rgba(255,255,255,.62) 压在 #23252A 上约 6.5:1，.5 就会掉到 4.4 边缘。 */
+.panel.dark .pnum{color:#fff}
+.panel.dark .pden,
+.panel.dark .pgcap,
+.panel.dark .pgmeta{color:rgba(255,255,255,.62)}
+.panel.dark .curline{color:rgba(255,255,255,.94)}
+.panel.dark .pgmeta b{color:#fff}
+.panel.dark .tag{background:rgba(255,255,255,.13);color:rgba(255,255,255,.72)}
+.panel.dark .tag.acc{background:rgba(41,151,255,.20);color:var(--g-rise)}
+
+/* 轨道：8px 提到 14px。它是"这一讲还要多久"的主图形，8px 读起来像一条分隔线。
+   凹槽仍用内阴影（不靠边框），填充在深底上换成暗色档的 #2997ff。
+   overflow 放开是为了让游标能高出轨道；填充自己补上圆角，避免低百分比时露直角。 */
+.panel.dark .track{position:relative;height:14px;margin:var(--s5) 0 var(--s3);overflow:visible;
+  background:rgba(255,255,255,.10);box-shadow:inset 0 1px 2px rgba(0,0,0,.42)}
+.panel.dark .track i{border-radius:inherit;position:relative;overflow:hidden;
+  background:linear-gradient(90deg,#0071e3,#2997ff);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 0 14px rgba(41,151,255,.42)}
+/* 游标：钉在**填充的右端**（跟随进度），不是钉在轨道右端。
+   位置由 --p 驱动、与轨道宽度共用同一条 .6s 过渡，所以两者永远同步。
+   translate:-50% 让它以自身中心对齐百分比刻度，0% / 100% 时也只是贴壁不会溢出。 */
+.panel.dark .track .knob{position:absolute;top:50%;left:clamp(2px,var(--p,0%),calc(100% - 2px));
+  width:3px;height:26px;
+  translate:-50% -50%;border-radius:var(--r-pill);background:rgba(255,255,255,.92);
+  box-shadow:0 0 10px rgba(41,151,255,.75),0 0 3px rgba(255,255,255,.9);
+  transition:left .6s var(--ease)}
+/* 流光：一道 40% 宽的斜向高光沿轨道扫过。**只在真在播放时跑** ——
+   常驻循环既是噪音，也白白每帧合成。 */
+.panel.dark .track.live i::after{content:"";position:absolute;top:0;bottom:0;left:0;width:40%;
+  background:linear-gradient(100deg,rgba(255,255,255,0) 0%,
+    rgba(255,255,255,.34) 50%,rgba(255,255,255,0) 100%);
+  animation:sheen 2.6s linear infinite}
+@keyframes sheen{from{translate:-100% 0}to{translate:350% 0}}
+
+/* 本轮信息：一行字，放在轨道下面。
+   ⚠ 这里刻意**没有**分隔线和第二根进度条（2026-10-19 用户实报"信息重复、多余"）：
+   同一张卡里"本轮 2/5"出现过两次，而顶栏那条 3px 线又在远处显示同一个比例 ——
+   一个事实只保留一种保真度：顶栏是环境（一条线的量级感），这里是精确数字。
+   少掉分隔线后卡矮了一截，深色面积不再是一块压下来的黑板（"突兀"的主因就是面积）。 */
+.panel.dark .dkfoot{margin-top:var(--s4)}
+
+/* 状态切换（未开始 → 刷课中）：仪表"点亮"一次 —— 数字与轨道从虚到实对上来。
+   复用灵动岛已经验证过的 islandFocus 语言（blur 3→0 + 上浮），一次性，不循环。 */
+.panel.dark.lit .pgrow,.panel.dark.lit .track{animation:deckIn .4s var(--ease-hover)}
+@keyframes deckIn{from{opacity:.45;filter:blur(3px);transform:translateY(4px)}
+  to{opacity:1;filter:blur(0);transform:none}}
+
+/* 数字换值：不做真正的翻牌（那要把数字拆成逐位），用一次 320ms 的"上移对焦"
+   表示"这个数刚刚变了"。只在值真的变了时播 —— 3 秒一次轮询不该让人眼花。 */
+.numTick{animation:numTick .32s var(--ease-hover)}
+@keyframes numTick{from{opacity:.35;transform:translateY(-.18em)}to{opacity:1;transform:none}}
+
+/* 骨架：识别期间清单/动态区放几行脉冲灰条，替掉"空状态插画 + 一句灰字"——
+   等待本身要有"在干活"的样子，才不像卡住了。 */
+.skelrow{display:flex;align-items:center;gap:10px;padding:11px 0}
+.skelrow .sk1{width:20px;height:20px;border-radius:var(--r-pill);flex:0 0 auto}
+.skelrow .sk2{flex:1 1 auto;height:12px;border-radius:var(--r-pill)}
+.skelrow .sk3{width:48px;height:12px;border-radius:var(--r-pill);flex:0 0 auto}
+.skelrow>*{background:var(--chip);animation:skelPulse 1.6s var(--ease) infinite}
+.skelrow:nth-child(2)>*{animation-delay:.18s}
+.skelrow:nth-child(3)>*{animation-delay:.36s}
+@keyframes skelPulse{0%,100%{opacity:.55}50%{opacity:.22}}
+.ph{font:400 21px/1.19 var(--f-disp);letter-spacing:.231px;font-weight:600;margin-bottom:var(--s4)}
+/* 折叠开关（讲次清单 / 最近动态）：标题本身就是按钮，行数多时点一下把清单收起来。
+   右侧计数（"N 讲 / N 条"）即使收起也告诉你里面有几条，不必展开就能心里有数。
+   箭头展开朝下、收起朝左（rotate -90deg），语义与 iOS 的 disclosure 三角一致。 */
+.phfold{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:0;cursor:pointer;color:var(--ink);border-radius:var(--r-xs);
+  /* 按压反馈走「列表行高亮」而不是缩放：整行宽几百 px，全局的 scale(.96) 会让
+     标题"咚"地晃一下（用户实报生硬）。iOS 列表行的语言就是按下时轻微变灰 ——
+     hover 一层极淡的、active 再深一档，松开即退。 */
+  transition:background-color .22s var(--ease-hover)}
+.phfold:hover{background:rgba(0,0,0,.045)}
+.phfold:active:not(:disabled){transform:none;background:rgba(0,0,0,.08)}
+.phfold .pht{flex:1 1 auto;min-width:0}
+.phfold .fcnt{flex:0 0 auto;font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;
+  color:var(--ink-48);font-variant-numeric:tabular-nums}
+.phfold .fcnt:empty{display:none}
+.phfold .fcaret{width:12px;height:12px;flex:0 0 auto;color:var(--ink-48);
+  /* ⚠ svg 元素的 transform-origin 默认是左上角 (0 0)，不是中心 ——
+     rotate 会围着左上角转，箭头整个甩出盒子（用户实报"点了箭头没反应"）。
+     必须显式归到中心，箭头才原地翻转。 */
+  transform-origin:50% 50%;
+  transition:transform .3s var(--ease-hover),color .26s var(--ease-hover)}
+.phfold.folded .fcaret{transform:rotate(-90deg)}
+.phfold:hover .fcaret{color:var(--primary)}
+.phfold:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:var(--r-xs)}
+/* 折叠容器：height auto↔0 过渡（靠 :root 的 interpolate-size:allow-keywords，与灵动岛同机制）。
+   ⚠ margin-inline:-10px + padding-inline:10px 是必须的：.frow.err 用负 margin 把高亮底
+   向两侧各溢出 10px（出血到面板内边距里），而折叠容器要 overflow:hidden 才能裁掉收起时的
+   高度 —— 可一旦 hidden 就会连横向那 10px 出血一起裁掉，报错行高亮底会退化成内缩、两侧露白缝。
+   给容器同样的 -10px margin + 10px padding 等值抵消：内容盒宽度不变，出血却有了 10px
+   容身之地，overflow:hidden 的裁剪边界正好包住它，视觉和没折叠容器时一模一样。
+   曲线用 --ease-hover（两端缓）：--ease 前段极陡，收/放会"啪"地一下，读起来生硬。 */
+.foldwrap{margin-inline:-10px;padding-inline:10px;overflow:hidden;
+  height:auto;transition:height .34s var(--ease-hover)}
+.foldwrap.folded{height:0}
+
+/* 讲次清单 */
+.items{display:flex;flex-direction:column}
+/* gap 从 12 收到 10：描边图标（20 视框 1.5 描边）四周有固有空白，
+   12px 的几何间距实测读成 14px。收到 10 之后墨迹间距才是 12 —— 眼睛看到的那 12。 */
+.item{display:flex;align-items:center;gap:10px;padding:11px 8px;margin-inline:-8px;
+  border-bottom:1px solid rgba(0,0,0,.045);min-width:0;position:relative;
+  /* 行悬停：整行极淡高亮。原来清单行完全没有悬停反馈 ——
+     长清单里鼠标滑过时"读不出自己读到哪一行了"。只动背景色，不动位移/缩放。 */
+  transition:background-color .2s var(--ease-hover)}
+.item:hover{background:rgba(0,0,0,.028);border-radius:var(--r-sm)}
+.item:hover .nm{color:var(--ink)}
+.item:last-child{border-bottom:0}
+/* 「正在播这一讲」的行：左侧 2px 竖标 + 名称提到 500 字重。
+   标记用 ::before 放在行外（卡片有 24px 内边距，放得下），不改行高也不改读数。
+   这是"签名母题：一根线"在列表尺度上的一档（顶栏 3px / 仪表 14px / 这里 2px / 时间轴 1px）。 */
+.item.play::before{content:"";position:absolute;left:-9px;top:10px;bottom:10px;width:2px;
+  border-radius:var(--r-pill);background:var(--primary)}
+.item.play .nm{font-weight:600}
+.item .ic{width:20px;height:20px;flex:0 0 auto;color:var(--ink-48)}
+.item .nm{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font:400 17px/1.24 var(--f-text);letter-spacing:-.374px}
+.item .st{flex:0 0 auto;font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;color:var(--ink-48)}
+.item .st b{font-weight:600;font-variant-numeric:tabular-nums}
+/* 播放中的那一行，用一条 40px 的微进度条代替"38%"这串数字 ——
+   同一个百分比在仪表里已经是大数字了，清单里再写一遍就是重复；
+   而一条微条既不重复、又让清单从"纯文字"变成有图形节奏的一列。 */
+.item .micro{display:inline-block;width:40px;height:3px;margin-left:8px;vertical-align:1px;
+  border-radius:var(--r-pill);background:rgba(0,0,0,.09);overflow:hidden}
+.item .micro b{display:block;height:100%;border-radius:inherit;background:var(--primary);
+  box-shadow:0 0 6px rgba(0,102,204,.35);
+  /* r75：节点按稳定键复用后，微条可以原地过渡 —— 播放中 +1%/轮询读作“在长” */
+  transition:width .6s var(--ease-hover)}
+.item.done .ic{color:var(--ok)} .item.done .st{color:var(--ok-tx)}
+.item.play .ic{color:var(--primary)} .item.play .st{color:var(--primary)}
+.item.bad .ic{color:var(--warn)} .item.bad .st{color:var(--warn-tx)}
+.item.fail .ic{color:var(--err)} .item.fail .st{color:var(--err-tx)}
+.item .pop{animation:pop .45s var(--ease) both}
+/* 空状态：极简几何插画（纯内联 SVG，零外部请求）。
+   尺寸给足、留白给够，否则在大面板里会小得像一个渲染残影。 */
+.empty{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;
+  color:var(--ink-48);font:400 14px/1.6 var(--f-text);letter-spacing:-.224px;
+  padding:var(--s5) 8px}
+.empty .illo{width:68px;height:68px;color:var(--ink-48);flex:0 0 auto}
+
+/* 时间轴：圆点之间补一段 1px 连线，整块就从"几行带点的文字"变成时间轴。
+   逐段画（.frow + .frow）而不是在容器上画一根长线：天然在每个圆点处断开，
+   不需要用面板底色去"打孔"——半透玻璃上打孔一定会露出色差。 */
+.feed{display:flex;flex-direction:column}
+.frow{display:grid;grid-template-columns:48px 20px minmax(0,1fr);align-items:start;gap:8px;
+  padding:7px 0;position:relative}
+.frow + .frow::before{content:"";position:absolute;left:65.5px;top:-7px;height:19px;width:1px;
+  background:rgba(0,0,0,.06)}
+.frow .ft{font:400 12px/1.5 var(--f-text);letter-spacing:-.12px;color:var(--ink-48);
+  font-variant-numeric:tabular-nums}
+.frow .fd{width:9px;height:9px;border-radius:var(--r-pill);margin:5px 0 0 5px;background:var(--chip)}
+.frow .fx{font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;color:var(--ink-80);min-width:0;
+  /* 动态里会出现没有空格的长 token（如临时目录路径"盘符:\用户名\..."），默认断不了行，
+     会横向顶出卡片（用户实拍）。anywhere 允许在任意字符处断行，长路径也能收进卡片。 */
+  overflow-wrap:anywhere}
+.frow.ok .fd{background:var(--ok)}   .frow.ok .fx{color:var(--ok-tx)}
+.frow.warn .fd{background:var(--warn)} .frow.warn .fx{color:var(--warn-tx)}
+/* 报错行的高亮底：**内容位置必须和别的行完全一致**。
+   以前写的是 padding:9px 10px —— 横向多出的 10px 会把时间列与圆点整体右移，
+   于是这一行的圆点和上下行对不齐（用户实拍反馈）。
+   正解：margin-inline 负值 + padding-inline 等值 —— 背景向两侧各溢出 10px，
+   而内容盒的左右边界与其它行**一模一样**，怎么都不会错位。
+   圆角用 --r-lg：这种整行高亮底用 8px 会读成"方角"（用户实拍反馈）。 */
+.frow.err{background:var(--lg-err-t);border-radius:var(--r-lg);
+  margin-inline:-10px;padding-inline:10px;padding-block:9px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+.frow.err .fd{background:var(--err)} .frow.err .fx{color:var(--err-tx)}
+.frow.info .fd{background:var(--chip)} .frow.info .fx{color:var(--ink-80)}
+/* 「重新开始」是这一行里的动作按钮，不该顶着下划线（下划线是"文字链"的语言）。
+   做成一颗小玻璃药丸，和整站的控件玻璃同一档。 */
+.frow .retry{color:var(--primary);font:400 14px/1.43 var(--f-text);
+  margin-left:8px;white-space:nowrap;vertical-align:baseline;
+  background-color:var(--lg-tint-hi);border-radius:var(--r-pill);
+  padding:3px 10px;box-shadow:var(--lg-ring)}
+.frow .retry:hover{color:#0055ad;background-color:rgba(255,255,255,.94);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 2px 8px rgba(0,0,0,.06)}
+.frow.enterRow{animation:enter .4s var(--ease) both}
+
+/* ---------- 关闭控制台后的收尾页（2026-09-16） ----------
+   点「关闭控制台」之后服务进程就退出了，这个标签页再也连不上任何东西。
+   浏览器**不允许**网页关闭"由用户/系统打开的标签页"（只允许关它自己 window.open 开的），
+   所以这里先尽力尝试自动关闭；真关不掉就换成这张干净的收尾页 ——
+   而不是留一个"连接不上控制台了"的报错界面，让用户以为出故障了。 */
+.bye{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+  background-color:var(--bg,#f5f5f7);padding:var(--s5);animation:byeIn .38s var(--ease) both}
+.bye[hidden]{display:none}
+@keyframes byeIn{from{opacity:0}to{opacity:1}}
+.byecard{max-width:440px;text-align:center;
+  background-color:rgba(255,255,255,.86);background-image:var(--lg-sheen);
+  border-radius:var(--r-lg);padding:var(--s6) var(--s5) var(--s5);
+  box-shadow:var(--lg-spec),var(--lg-inner),var(--lg-lift-1)}
+.byecard h2{margin:0 0 var(--s3);font:600 21px/1.19 var(--f-disp);letter-spacing:-.231px}
+.byecard p{margin:0 0 var(--s5);font:400 14px/1.5 var(--f-text);color:var(--ink-80);
+  text-wrap:pretty}
+.byecard kbd{font:600 12px/1 var(--f-text);padding:2px 5px;border-radius:var(--r-xs);
+  background-color:var(--lg-tint-hi);box-shadow:var(--lg-ring)}
+.bye .row{display:flex;justify-content:center}
+/* ⚠ 药丸外形（圆角 / 最小高度 / 居中）其实定义在「.ctas .row>*」那条里，
+   不在 .ghostpill 自己身上 —— 收尾页的按钮不在 .ctas 上下文里，拿不到它，
+   于是渲染成 UA 默认的小方按钮（截图时发现的：圆角 0px、高 29px）。
+   所以这里必须自己补一份。 */
+.bye .row>*{display:inline-flex;align-items:center;justify-content:center;
+  min-height:44px;border-radius:var(--r-pill);padding:0 22px}
+
+/* ---------- 悬停 / 按压的过渡通道（必须放在所有组件规则之后） ----------
+   悬停不是"变深/变浅"这种颜色跳变（那样很廉价），而是「**被光照到**」：
+   镜面高光更亮 + 浮起更深 + 整体抬起 1px，颜色只做轻微提亮。
+   四条实现要点：
+   ① **悬停必须用 --ease-hover，不能用 --ease。** --ease(.22,1,.36,1) 是给入场动画用的，
+      前段极陡：实算 t=10% 时已经走了 40%、t=25% 走了 76% —— 读起来就是"啪"地一下切过去
+      再慢慢蹭完。--ease-hover(.4,0,.2,1) 在 t=10% 只走 2.6%，两端都缓，变化是"滑"过去的。
+   ② 时长做**轻微级联**（颜色 .26s → 抬升 .3s → 阴影 .34s）：镜面先亮、阴影随后压深，
+      读起来像"光打到 → 物体抬起"；五条通道同时同速反而显得像开关。
+   ③ 抬起用**独立的 translate 属性**，按压缩放用 transform：两者互不覆盖，
+      于是能各用各的时间曲线（按下 .1s 直落、松开 .5s 弹簧）。
+   ④ transition 是单值属性，后来者会把先前的**整条**覆盖掉。所以：
+      - 必须放在所有组件规则之后（放在前面会被逐条盖掉）；
+      - **全文件只能有这一处**。曾经同时存在过两条同名分组规则，靠前那份带着旧的
+        4 通道（没有 box-shadow / translate），结果阴影和抬起是"瞬移"的 —— 悬停生硬。
+        改这段之前先确认文件里只有一条。 */
+.hero,.ghostpill,.pearl,.chipbtn,.mini,.iconbtn{
+  transition-property:background-color,border-color,color,box-shadow,translate,transform;
+  transition-duration:.26s,.26s,.26s,.34s,.3s,.5s;
+  transition-timing-function:var(--ease-hover),var(--ease-hover),var(--ease-hover),
+    var(--ease-hover),var(--ease-hover),var(--spring-press)}
+/* 菜单项 / 文字链只在原地变化，不跟着抬 —— 菜单里元素乱动会很毛躁 */
+.link,.mitem,.retry,.how summary{
+  transition-property:background-color,color,box-shadow;
+  transition-duration:.26s,.26s,.3s;
+  transition-timing-function:var(--ease-hover),var(--ease-hover),var(--ease-hover)}
+
+/* 滚动条：细窄圆润低调 */
+*{scrollbar-width:thin;scrollbar-color:var(--chip) transparent}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--chip);border-radius:var(--r-pill)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- 折叠：834px 以下单列 ---------- */
+@media (max-width:1068px){
+  .layout{grid-template-columns:340px minmax(0,1fr)}
+  .h1{font-size:34px;line-height:1.47;letter-spacing:-.374px}
+  .lead{font-size:24px;line-height:1.5;letter-spacing:0;font-weight:300}
+}
+@media (max-width:834px){
+  .layout{grid-template-columns:minmax(0,1fr);gap:var(--s6)}
+  .lead{margin-bottom:var(--s6)}
+  .wrap{padding:var(--s6) 20px var(--s7)}
+  .h1{font-size:34px}
+  .tb-state span{display:none}                 /* 顶栏状态只留小圆点 */
+  .island{max-width:min(420px,calc(100% - 458px))}
+  .island.big{max-width:min(700px,calc(100% - 458px))}
+}
+/* 窄屏顶栏挤不下时：让位给"关闭控制台"，状态信息由右栏承担
+   （说明：控制台只监听 127.0.0.1，手机上打不开，所以没有"手机档"。
+     这里的窄屏断点服务的是电脑上的两种情况：窗口被拉窄/分屏，以及浏览器放大—— 
+     2560 屏 @125% 缩放 → 2048 CSS px，放大到 250% 就只剩 ~819px，正好落到 834 档） */
+@media (max-width:640px){
+  .tb-time{display:none}
+  #btnHow{display:none}
+  .island:not(.big){display:none}
+  /* 这个断点下操作区只剩 125px，上限常数相应缩小到 2×125+2×16 */
+  .island.big{max-width:calc(100% - 282px)}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  /* 「悬停抬起」属于位移，降低动效偏好下要一并去掉（只留颜色/阴影变化） */
+  *{translate:none!important}
+}
+
+/* r68：轮廓由持续弹簧驱动；内容只有短淡入，不重播整行动画。 */
+.island.morphing{contain:layout style;will-change:width,height}
+.island.morphing .itext,.island.morphing .iacts{animation:none!important;filter:none!important}
+.island .iacts{transition:opacity .20s var(--ease-hover)}
+@media(prefers-reduced-motion:reduce){.island,.island *{animation:none!important;transition:none!important}}
+
+/* Motion Prompt #160 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#160
+   The control keeps its footprint. Waiting and confirmed playback have distinct icons. */
+.hero{position:relative;font-weight:400}
+.hero .spin{animation-duration:700ms!important}
+.hero.ok .ck path{animation-duration:250ms}
+.hero.running:disabled{
+  background:var(--acc-t);color:var(--primary);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--primary) 18%,transparent),
+    0 3px 8px rgba(0,102,204,0),0 6px 20px rgba(0,102,204,0);
+  cursor:default;
+}
+.hero .runmark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:2px;
+  opacity:0;scale:.6;transition:opacity .25s var(--ease),scale .35s var(--spring-press)}
+.runmark i{width:7px;height:7px;border-radius:var(--r-pill);background:currentColor;
+  box-shadow:0 0 0 4px color-mix(in srgb,currentColor 12%,transparent)}
+.hero.running:not(.loading):not(.ok) .runmark{opacity:1;scale:1}
+.hero.running .ic{opacity:0;scale:.25}
+/* Based on Motion Prompt #079 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#079
+   The fill is driven by actual lecture progress, with the original 450ms movement slot. */
+.hero .runpct{position:absolute;right:24px;font:600 12px/1 var(--f-text);font-variant-numeric:tabular-nums;
+  color:var(--primary);opacity:0;translate:4px 0;pointer-events:none;
+  transition:opacity .25s var(--ease-hover),translate .35s var(--ease)}
+.hero .runtrack{position:absolute;left:24px;right:24px;bottom:7px;height:2px;
+  border-radius:var(--r-pill);overflow:hidden;background:var(--acc-t);opacity:0;
+  transition:opacity .25s var(--ease-hover);pointer-events:none}
+.hero .runtrack i{display:block;height:100%;width:var(--run-progress,0%);border-radius:inherit;
+  background:var(--primary);opacity:.5;transition:width 450ms var(--motion-io)}
+.hero.running .runpct,.hero.running .runtrack{opacity:1;translate:0 0}
+.hero.running .lbl{font-weight:600}
+.hero:not(.running) .runpct,.hero:not(.running) .runtrack{visibility:hidden}
+.hero.ok:not(.running):disabled{background:var(--primary);color:var(--on-primary)}
+.hero .ec{position:absolute;width:18px;height:18px;opacity:0;scale:.25;
+  transition:opacity .2s var(--ease),scale .3s var(--spring-press)}
+.hero .ec path{stroke-dasharray:1;stroke-dashoffset:1}
+.hero.error,.hero.error:hover:not(:disabled){background:var(--err-t);color:var(--err-tx);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--err) 28%,transparent),
+    0 3px 8px rgba(255,59,48,0),0 6px 20px rgba(255,59,48,0)}
+.hero.error .ec{opacity:1;scale:1}
+.hero.error .ec path{animation:ckDraw 250ms var(--ease) forwards}
+.hero.error .ic,.hero.error .spin{opacity:0;scale:.25}
+.ghostpill.loading > svg,.rescan.loading > svg{animation:spin 700ms linear infinite}
+.ghostpill.loading{background-color:var(--acc-t);color:var(--primary)}
+.chipbtn.rescan.loading{background-color:var(--acc-t);color:var(--primary);border-color:var(--primary)}
+button:focus-visible,.how summary:focus-visible{outline:2px solid var(--primary);outline-offset:4px}
+/* Motion Prompt #052 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#052 */
+.foldwrap{transition-duration:var(--motion-fold);transition-timing-function:var(--motion-io)}
+.foldwrap.folded{transition-duration:var(--motion-fold-close)}
+.how ul{margin-top:var(--s4);display:flex;flex-direction:column;gap:10px;
+  font:400 14px/1.65 var(--f-text);color:var(--ink-80);letter-spacing:-.224px}
+.how ul li{position:relative;padding-left:16px}
+.how ul li::before{content:'·';position:absolute;left:3px;color:var(--ink-48)}
+/* Motion Prompt #053 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#053 */
+.menu{transform:translateY(-6px);transition:opacity var(--motion-menu-close) var(--motion-io),
+  transform var(--motion-menu-close) var(--motion-io),visibility 0s var(--motion-menu-close);visibility:hidden}
+.menu.open{transform:none;visibility:visible;transition-duration:var(--motion-menu);transition-delay:0s}
+.chipbtn.open{border-color:var(--primary);color:var(--primary)}
+.item.play{background-color:var(--acc-t)}
+.item{transition:background-color .25s var(--ease-hover)}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .hero .runmark i{transform:none}
+  .hero.ok .ck path,.hero.error .ec path{stroke-dashoffset:0}
+}
+
+</style>
+</head>
+<body>
+
+<!-- 顶栏（sub-nav-frosted）：品牌 · 灵动岛 · 时间 · 操作 -->
+<div class="topbar">
+  <div class="tb-in">
+    <span class="tb-left">
+      <span class="tb-brand" id="tbBrand">刷课控制台</span>
+    </span>
+    <!-- 灵动岛直接当中间的 flex 项：左右两侧（品牌 / 操作区）都是 flex:1 1 0，
+         两侧轨道恒等宽，所以岛必然落在容器正中央、屏幕正上方。 -->
+    <div class="island" id="island" role="status" aria-live="polite">
+      <span class="idot sdot" id="iDot"></span>
+      <span class="itexts" style="min-width:0"><span class="itext" id="iText">正在打开…</span></span>
+      <span class="ibar" id="iBarWrap" style="display:none"><i id="iBar"></i></span>
+      <span class="iacts" id="iActs"></span>
+    </div>
+    <span class="tb-right">
+      <span class="tb-state"><i class="sdot" id="tbDot"></i><span id="tbStateText">连接中</span></span>
+      <span class="tb-time num" id="clock">--:--</span>
+      <!-- 说明入口图标化：不再和左栏的「如何使用」文字重复，点了会展开并滚到那一段 -->
+      <button class="iconbtn" id="btnHow" type="button" title="如何使用" aria-label="如何使用" aria-expanded="false" aria-controls="howBox">
+        <!-- 描边 2.1 是从 24 视框缩到 17px 渲染后 ≈1.5px，正好对上旁边 400 字重文字。
+             直接写 1.5 的话渲染出来只有 1.06px，会显得发虚。 -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .9-1 1.6v.3"/>
+          <circle cx="12" cy="17.1" r=".95" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button class="pearl" id="btnQuit" type="button" title="先停止刷课，再关闭控制台"><span class="lbl">关闭控制台</span></button>
+    </span>
+  </div>
+  <div class="tb-prog" id="tbProg"></div>
+</div>
+
+<div class="wrap">
+  <div class="layout">
+
+    <!-- ================= 左：操作区（无卡片） ================= -->
+    <section class="ops">
+      <p class="eyebrow">砺儒云课堂</p>
+      <h1 class="h1">自动刷课助手</h1>
+      <p class="lead" id="leadLine">三步就绪，<em>剩下交给它</em>。</p>
+
+      <ol class="steps" id="steps">
+        <li class="spfill" aria-hidden="true"></li>
+        <li class="step" id="st1">
+          <span class="sn">1</span>
+          <span class="stx"><b>连接已有 Edge</b><span>点下面的「接管 Edge」</span></span>
+        </li>
+        <li class="step" id="st2">
+          <span class="sn">2</span>
+          <span class="stx"><b>登录并点开要刷的一讲</b><span>在 Edge 中登录，并打开要开始播放的那讲视频</span></span>
+        </li>
+        <li class="step" id="st3">
+          <span class="sn">3</span>
+          <span class="stx"><b>核对进度</b><span>点「重新识别」，看清各章还剩几讲（只核对、不播放）</span></span>
+        </li>
+        <li class="step" id="st4">
+          <span class="sn">4</span>
+          <span class="stx"><b>点「开始刷课」</b><span>之后窗口可以最小化，进度会自己走</span></span>
+        </li>
+      </ol>
+
+      <div class="ctas">
+        <button class="hero" id="btnStart" type="button">
+          <!-- 图标与转圈重叠在同一个 18×18 槽里、靠 opacity/scale/blur 交叉淡入。
+               用 display 硬切会"啪"地一下换掉，而且两者宽度不同还会顶得文字左右挪。 -->
+          <span class="hic">
+            <span class="runmark" aria-hidden="true"><i></i></span>
+            <span class="spin"></span>
+            <svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.3v13.4L19 12z"/></svg>
+            <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square" aria-hidden="true"><path pathLength="1" d="M5 12.6l4.6 4.4L19 7.6"/></svg>
+            <svg class="ec" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path pathLength="1" d="M6 6l12 12M18 6L6 18"/></svg>
+          </span>
+          <span class="lbl">开始刷课</span>
+          <span class="runpct" aria-hidden="true"></span>
+          <span class="runtrack" aria-hidden="true"><i></i></span>
+        </button>
+        <div class="row">
+          <button class="ghostpill" id="btnEdge" type="button">
+            <!-- 同上：24 视框缩到 17px，描边 2.1 → 渲染 ≈1.5px，与 400 字重的标签同重 -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                 style="width:17px;height:17px"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.6 2.4 15.4 0 18M12 3c-2.4 2.6-2.4 15.4 0 18"/></svg>
+            <span class="lbl">接管 Edge</span>
+          </button>
+          <button class="pearl" id="btnStop" type="button"><span class="lbl">停止</span></button>
+        </div>
+      </div>
+
+      <div class="range">
+        <span class="rlabel">刷课范围</span>
+        <div class="rrow">
+          <button class="chipbtn" id="scopeBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+            <span class="txt" id="scopeTxt">从当前讲刷到课程结束</span>
+            <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <!-- 「重新识别」：控制台显示的"还剩几讲"来自引擎上次运行写的快照，
+               可能已经过时（你自己在平台网页上看完一讲、老师新加了资源都不会反映）。
+               与其让控制台定时偷偷去核对（会动你的浏览器页面），不如把这把刷新的钥匙交给你。
+               它只识别、不播放：重读课程结构 + 逐个核对每讲完成情况，然后更新界面。 -->
+          <button class="chipbtn rescan" id="btnScan" type="button"
+                  title="重新核对每一讲：更新章节结构，并重新判断哪几讲还没完成（只识别，不播放视频）">
+            <svg class="ric" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.4 12a8.4 8.4 0 1 1-2.5-6"/><path d="M20.4 3.8v4.6h-4.6"/>
+            </svg>
+            <span class="lbl">重新识别</span>
+          </button>
+          <div class="menu" id="scopeMenu" role="listbox"></div>
+        </div>
+        <p class="rhint" id="rangeHint"></p>
+        <div class="review-summary" id="reviewSummary" hidden></div>
+      </div>
+
+      <details class="how" id="howBox">
+        <summary>如何使用（点开看）</summary>
+        <ul>
+          <li>三步走完就会自动开刷，期间窗口可以最小化。</li>
+          <li>每章显示"还剩几讲"是<b>上次识别</b>的结果。你自己在平台看完一讲、或老师加了内容，
+              点「重新识别」马上刷新（只核对、不播放）。</li>
+          <li>收工：先点「停止」，再点右上角「关闭控制台」。顺序反了也别慌——重开控制台会提示你点「结束它」收拾干净。</li>
+        </ul>
+      </details>
+    </section>
+
+    <!-- ================= 右：看板区 ================= -->
+    <section class="board">
+      <!-- 深色仪表：全页唯一的深色结构件（材质与顶栏灵动岛同源）。
+           焦点 = 当前讲进度；本轮完成度收到最下面那根分隔线（它自己就是进度条）。 -->
+      <div class="panel dark" id="deck">
+        <div class="pgrow"><span class="pnum" id="doneNum">—</span><span class="pden" id="planNum">/ — 讲</span></div>
+        <p class="pgcap" id="pgCap">本轮已完成</p>
+        <div class="track" id="track"><i id="bar"></i><b class="knob" id="knob" aria-hidden="true"></b></div>
+        <p class="curline" id="curLine">还没有开始，左边点「开始刷课」就行</p>
+        <div class="dkfoot" id="dkFoot">
+          <div class="pgmeta" id="pgMeta">
+            <span>本讲 <b class="num">—</b></span>
+            <span>当前进度 <b class="num">—</b></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <button class="ph phfold" id="foldItems" type="button" aria-expanded="true" aria-controls="itemsWrap">
+          <span class="pht">讲次清单</span>
+          <span class="fcnt num" id="itemsCnt"></span>
+          <svg class="fcaret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="foldwrap" id="itemsWrap">
+          <ul class="items" id="items"></ul>
+        </div>
+      </div>
+
+      <div class="panel">
+        <button class="ph phfold" id="foldFeed" type="button" aria-expanded="true" aria-controls="feedWrap">
+          <span class="pht">最近动态</span>
+          <span class="fcnt num" id="feedCnt"></span>
+          <svg class="fcaret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="foldwrap" id="feedWrap">
+          <ul class="feed" id="feed"></ul>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- 关闭控制台后的收尾页：默认隐藏，退出时显示（见 closeSelf / showByeScreen） -->
+<div class="bye" id="bye" hidden>
+  <div class="byecard">
+    <h2 id="byeTitle">控制台已关闭</h2>
+    <p id="byeNote">刷课已停止，进度已保存。浏览器保留了这个标签页，请用下方快捷键关闭。</p>
+    <p class="close-instruction" id="btnCloseTab"><kbd>Ctrl</kbd> + <kbd>W</kbd> 关闭此页</p>
+  </div>
+</div>
+
+<script src="shared/poll.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+
+/* ---------- 小工具 ---------- */
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const mmss = s => {
+  s = Math.floor(s || 0);
+  const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60;
+  return (h ? h+':' : '') + String(m).padStart(h?2:1,'0') + ':' + String(x).padStart(2,'0');
+};
+const shortName = n => (n || '').replace(/-(教学视频|课件|作业|测验)$/, '');
+/* 讲次状态图标：视框 20、渲染 20px ⇒ 1:1，描边 1.5 就是渲染 1.5px，
+   正好对上条目名称的 400 字重。同一图标集**只用一个描边粗细**，混着写会显得不齐。
+   唯一例外是 done：它是实心圆上的"挖空"对勾，挖空描边按惯例要比描边型图标重一档。 */
+const ICON = {
+  done:'<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6.1 10.3l2.5 2.5L13.9 7.5" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  run :'<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="8.6" stroke="currentColor" stroke-width="1.5" opacity=".38"/><circle cx="10" cy="10" r="4.1" fill="currentColor"/></svg>',
+  wait:'<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="8.4" stroke="currentColor" stroke-width="1.5"/></svg>',
+  bad :'<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor" opacity=".18"/><path d="M10 5.6v5.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14.1" r="1.05" fill="currentColor"/></svg>',
+  fail:'<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="8.4" stroke="currentColor" stroke-width="1.5"/><path d="M7.3 7.3l5.4 5.4M12.7 7.3l-5.4 5.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
+};
+/* 空状态插画：纯几何、单色、零外部请求。
+   内部 opacity 别调太低：底色本身已经是很淡的灰（--ink-48），再叠一层低透明度
+   最终会淡到几乎看不见，看起来像渲染残影而不是插画。 */
+const ILLO = {
+  items:'<svg class="illo" viewBox="0 0 48 48" fill="none" aria-hidden="true">' +
+    '<rect x="6" y="10" width="36" height="23" rx="6.5" stroke="currentColor" stroke-width="1.6" opacity=".55"/>' +
+    '<path d="M20.6 16.6v10l8.6-5z" fill="currentColor" opacity=".75"/>' +
+    '<rect x="12" y="37.5" width="24" height="3" rx="1.5" fill="currentColor" opacity=".28"/>' +
+    '<rect x="12" y="37.5" width="10" height="3" rx="1.5" fill="currentColor" opacity=".68"/></svg>',
+  feed:'<svg class="illo" viewBox="0 0 48 48" fill="none" aria-hidden="true">' +
+    '<path d="M15 12v24" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".38"/>' +
+    '<circle cx="15" cy="13" r="3" fill="currentColor" opacity=".68"/>' +
+    '<circle cx="15" cy="24" r="3" fill="currentColor" opacity=".48"/>' +
+    '<circle cx="15" cy="35" r="3" fill="currentColor" opacity=".30"/>' +
+    '<rect x="23" y="10.5" width="19" height="4" rx="2" fill="currentColor" opacity=".38"/>' +
+    '<rect x="23" y="21.5" width="14" height="4" rx="2" fill="currentColor" opacity=".30"/>' +
+    '<rect x="23" y="32.5" width="17" height="4" rx="2" fill="currentColor" opacity=".22"/></svg>'
+};
+
+function shortWarn(t){const m=LiruInterface.message(t);return m.detail ? m.title : m.text;}
+
+/* ---------- 胶囊弹窗 ---------- */
+/* 岛内文本按「段」渲染（2026-09-16，用户要求"只有数字变就别整行都变"）：
+   每段有稳定的 k（骨架）和会变的 v。
+     · v 变了的段才动 DOM；
+     · 带 t:1 的段（百分比、时长这类数字）变化 → 只播 segTick（段内小动）；
+     · 不带 t 的段（讲次名、状态词）变化 → 说明换讲了/换状态了 → 才走整行 swap 分镜。
+   这样同一讲里 38%→41%，屏幕上动的只有那三个数字。 */
+let notice = null, manualOpen = false, manualCloseTimer = null, islandClickTimer = null, notifyTimer = null;
+const SEG_TICK = {pct:1, time:1, txt:1};
+const S = (k, v, tick) => ({k:k, v:v, t:!!tick});
+const segsOf = (brief, full) => ({segs:[S('txt', brief)], segsFull:[S('txt', full || brief)]});
+
+function islandData(j){
+  const cur = j.current || {}, p = j.progress || {}, wk = cur.week;
+  /* index 为 0 = 后端从页面标题/课程结构**推**出来的讲次，不是引擎报的序号。
+     这时只能显示讲次名；硬写「第 0/2 讲」是错的（真实 bug：岛上曾出现"第 0/2 讲"）。 */
+  const pos = wk ? ('第 ' + wk.k + '/' + wk.n + ' 讲') : (cur.index > 0 ? ('第 ' + cur.index + '/' + cur.total + ' 讲') : '');
+  const stray = (j.strays || []).length;
+  if(!j.alive && stray){
+    return Object.assign({dot:'warn', cls:'att',
+      actions:[{k:'stop', label:'结束它'}]},
+      segsOf('脚本还在后台运行', '上次没停干净的脚本还占着浏览器'));
+  }
+  if(j.warn){
+    const w = j.warn.text || '';
+    return Object.assign({dot:'warn', cls:'att',
+      actions:[{k:'details',label:'详细原因'},{k:'dismiss',label:'知道了',ghost:true}]},
+      segsOf(shortWarn(w),LiruInterface.userText(w)));
+  }
+  if(j.state === 'scanning' || j.scan_proc){
+    return Object.assign({dot:'run', cls:'ok'},
+      segsOf('正在重新识别…', '逐讲核对完成情况，只识别不播放'));
+  }
+  if(j.edge_connection && j.edge_connection.state === 'connecting'){
+    return Object.assign({dot:'run', cls:''}, segsOf('等待 Edge 授权', LiruInterface.userText(j.edge_connection.message || '请在 Edge 中确认连接')));
+  }
+  if(j.alive){
+    /* 「重新识别」那一轮只核对、不播放 —— 不能沿用"正在刷课"的文案，
+       否则用户会以为视频已经在放了。 */
+    if(j.state === 'scanning' || !!j.scan_proc){
+      return Object.assign({dot:'run', cls:'ok'},
+        segsOf('正在重新识别…', '逐讲核对完成情况，只识别不播放'));
+    }
+    /* 刷课途中登录过期：引擎在登录页等着，岛却会一直显示"正在刷课"——
+       必须顶出来让用户去重新登录（脚本会自动继续）。 */
+    if(j.page === 'login'){
+      return Object.assign({dot:'warn', cls:'att',
+        actions:[{k:'dismiss', label:'知道了', ghost:true}]},
+        segsOf('需要重新登录', '请在 Edge 中重新登录，处理网页提示后再继续'));
+    }
+    /* 开登录窗口那一轮（alive 但不是在刷课）：不能落进"正在刷课"的默认文案 */
+    if(j.state === 'edge'){
+      return Object.assign({dot:'run', cls:''},
+        segsOf('正在连接已有 Edge', '请在 Edge 中确认调试连接授权'));
+    }
+    if(j.state === 'starting'){
+      return Object.assign({dot:'run', cls:''},
+        segsOf('正在连接浏览器', '正在附着浏览器并核对课程'));
+    }
+    const timeTxt = p.cur != null ? ('已看 ' + mmss(p.cur) + ' / ' + mmss(p.dur)) : '正在连接浏览器';
+    /* 收缩态：骨架（讲次/讲名）与数字（百分比）分开；
+       展开态：把百分比换成"已看 12分03秒 / 共 45分00秒"。
+       ⚠ 两套的**段键必须完全一致**（缺的位写空值，分隔符按"后面还有没有内容"决定）。
+       只要键序列变了，renderSegs 就会判"整行换了"→ 整行重播 swap，
+       展开瞬间看到的就是整行字重新对焦，而不是同一个东西长大。
+       空段的宽度是 0（inline-block + white-space:pre 只管空格），所以不会漏出间隔。 */
+    /* 岛只负责**一件事**：还要多久。
+       这是刷课时唯一需要随时瞥一眼的信息，也是它在吸顶栏里的唯一价值
+       （往下滚清单时，右栏仪表会滚走，岛还在）。
+       讲名 / 章节 / 百分比都在右栏仪表里 —— 岛再写一遍就是纯重复。
+       点开才给全量信息，这正是灵动岛"瞥一眼 → 点开看详情"的本义。 */
+    const remTxt = (p.cur != null && p.dur != null)
+      ? ('还剩 ' + mmss(Math.max(p.dur - p.cur, 0)))
+      : (p.pct != null ? ('还剩 ' + Math.max(100 - (p.pct || 0), 0) + '%') : '正在连接浏览器');
+    const pctTxt = p.pct != null ? ((p.pct || 0) + '%') : '';
+    const mk = (lead, tailK, tailV, withName) => [
+      S('lead', lead),
+      S('sep1', pos ? ' · ' : ''), S('pos', pos || ''),
+      S('sep2', (withName && cur.name) ? ' · ' : ''), S('name', withName ? (cur.name || '') : ''),
+      S('sep3', tailV ? ' · ' : ''), S('pct', tailK === 'pct' ? tailV : '', 1),
+      S('sep4', ''), S('time', tailK === 'time' ? tailV : '', 1),
+    ];
+    return {dot:'run', cls:'ok', segs:mk('正在刷课', 'pct', remTxt, false),
+      segsFull:mk('正在正常运行', 'time', timeTxt, true), bar: p.pct != null ? p.pct : null};
+  }
+  if(j.cdp_up){
+    /* 端口还在、窗口已经关了：不能再引导"去窗口里点视频"——窗口不存在 */
+    if(j.page === 'none'){
+      return Object.assign({dot:'warn', cls:'warn',
+        actions:[{k:'edge', label:'接管 Edge'}]},
+        segsOf('未找到课堂标签', LiruInterface.userText((j.edge_connection && j.edge_connection.message) || '请在 Edge 中打开课程页面')));
+    }
+    if(j.page === 'login') return Object.assign({dot:'warn', cls:'warn'},
+      segsOf('等待登录', '在Edge 中完成登录，点开一节视频'));
+    if(j.page === 'video') return Object.assign({dot:'ok', cls:'ok',
+        actions:[{k:'start', label:'开始刷课'}]},
+      segsOf('已就绪', '视频页已打开，随时可以开始'));
+    if(j.page === 'course'){
+      if(startReady(j)) return Object.assign({dot:'ok', cls:'ok',
+        actions:[{k:'start', label:'开始刷课'}]},
+        segsOf('课程页已打开，可以开始', '当前范围会自动导航'));
+      return Object.assign({dot:'warn', cls:'warn'},
+        segsOf('等你在 Edge 中点开一节视频', '从当前讲/当前章开始，先点开一讲视频'));
+    }
+    if(j.page === 'activity') return Object.assign({dot:'warn', cls:'warn'},
+      segsOf('这一页不是视频', '回到课程页，点开带播放器的那一讲'));
+    if(j.page === 'unverified') return Object.assign({dot:'warn', cls:'warn',
+        actions:j.scanned ? [{k:'review',label:'查看内容'}] : [{k:'scan', label:'重新识别'}]},
+      j.scanned ? segsOf('这项内容需手动查看', '未加入自动播放，请在课程页面手动查看；其他视频可正常开始')
+        : segsOf('先核对视频清单', '点「重新识别」核对当前课程'));
+    if(j.page === 'moodle') return Object.assign({dot:'warn', cls:'warn'},
+      segsOf('等你在 Edge 中打开课程页', '先回到课程页，或点开一讲视频'));
+    return Object.assign({dot:'warn', cls:'warn'},
+      segsOf('等你在 Edge 中点开一节视频', '在Edge 中点开要刷的那一节'));
+  }
+  return Object.assign({dot:'off', cls:'',
+    actions:[{k:'edge', label:'接管 Edge'}]},
+    segsOf('尚未接管 Edge', LiruInterface.userText((j.edge_connection && j.edge_connection.message) || '先打开 Edge，再点「接管 Edge」')));
+}
+
+/* 定点渲染：结构没变就只改变了的段；返回 true 表示"骨架变了"（调用方据此播整行动画） */
+function renderSegs(wrap, segs, skipTick){
+  if(!wrap) return false;
+  const structKey = segs.map(s => s.k).join('|');
+  const skeleton = segs.filter(s => !SEG_TICK[s.k]).map(s => s.k + '=' + s.v).join('|');
+  if(wrap.dataset.struct !== structKey){
+    /* 段的数量/种类变了 → 一次性带内容重建。
+       带内容而不是"先建空壳再填"，是为了避免空 span 让这一行的高度/基线闪一帧。 */
+    wrap.dataset.struct = structKey;
+    wrap.innerHTML = segs.map(s => '<span class="sg" data-k="' + esc(s.k) + '">' + esc(s.v) + '</span>').join('');
+    wrap.dataset.skel = skeleton;
+    return true;
+  }
+  let skeletonChanged = false;
+  for(const s of segs){
+    const n = wrap.querySelector('[data-k="' + s.k + '"]');
+    if(!n || n.textContent === s.v) continue;       // 内容没变 → 一个字节都不动
+    n.textContent = s.v;
+    if(SEG_TICK[s.k]){
+      /* 过渡期间**不要**加 .tick：CSS 虽然能把动画压住，但类会一直留着，
+         等 .morphing 摘掉的那一刻动画才开始播 —— 每次开合都在收尾闪一下。
+         所以由调用方显式传入 skipTick（不能在加 .morphing 之后再判：
+         为了正确量终态，"舞台类"是在量完之后才挂上的）。 */
+      if(!skipTick){
+        n.classList.remove('tick'); void n.offsetWidth; n.classList.add('tick');
+      }
+    }else{
+      skeletonChanged = true;
+    }
+  }
+  if(skeletonChanged) wrap.dataset.skel = skeleton;
+  return skeletonChanged;
+}
+
+/* ---------- 动效边界：只改颜色/透明度/尺寸，不动模糊半径 ---------- */
+
+/* ================= 灵动岛「一镜到底」（2026-10-19） =================
+   为什么原来的展开"没有过渡态"：
+     ① 岛是贴字宽度（flex:0 1 auto），这种尺寸 CSS 无法插值 —— 点开的瞬间宽度
+        由文字**瞬间**决定，居中的岛左边缘瞬移约 40px，标和文字是"跳"过去的；
+     ② 两套文案（收缩 pct / 展开 time）的段键不同，renderSegs 判"整行换了"，
+        整行重播 swap；同一帧 .itexts 还在跑 islandFocus —— 两套"重新对焦"抢一行字；
+     ③ align-items 从 center 切到 flex-start 是离散属性，状态点第一帧跳 6px。
+   做法（"舞台"）：
+     量首末两端几何 → 把岛宽高锁成 px 跑 --spring-island → 过渡期间四个孩子按
+     **终态布局**绝对定位（宽度/左右一律取终态，只有 top 与岛宽高在过渡）。
+     于是老内容滑出去、新内容从圆角边缘被"揭开"：零重排、零瞬跳，
+     标和文字随岛的左边缘一起移动。收起是同一套等比逆序，不写第二套动画。
+
+   三条"符合直觉"的硬规则（改这里之前先读）：
+     1) 位移方向必须与几何变化方向一致 —— 孩子钉在岛的内边距上，岛往哪边长它们就往哪边移；
+     2) 收起必须是展开的严格逆序 —— 同时长、同曲线、同一条过渡，不另写一套；
+     3) 每处动效都要有物理借口 —— 改尺寸就播尺寸、新内容用揭示、消失的内容被边缘吃掉。 */
+const ISLAND_KID_MODE = ['lw', 'lw', 'rw', 'lr'];   /* dot / itexts / ibar / iacts */
+
+function reduceMotion(){
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches);
+}
+
+function islandKids(el){
+  return [el.querySelector('.idot'), el.querySelector('.itexts'),
+          el.querySelector('.ibar'), el.querySelector('.iacts')];
+}
+
+/* 量一次：岛自身 + 四个孩子相对"岛左上角"的偏移（内边距盒坐标）+ 屏幕坐标。
+   屏幕坐标是给"位移差"用的 —— 起态的位置不能靠推算，必须直接量。 */
+function snapIsland(el){
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  const bl = parseFloat(cs.borderLeftWidth) || 0;
+  const bt = parseFloat(cs.borderTopWidth) || 0;
+  const br = parseFloat(cs.borderRightWidth) || 0;
+  const kids = islandKids(el).map(k => {
+    if(!k) return null;
+    const b = k.getBoundingClientRect();
+    const shown = b.width > .5 || b.height > .5;
+    return {shown:shown,
+            left:+(b.left - r.left - bl).toFixed(2), top:+(b.top - r.top - bt).toFixed(2),
+            right:+((r.right - br) - b.right).toFixed(2), width:+b.width.toFixed(2),
+            x:+b.left.toFixed(2), y:+b.top.toFixed(2)};
+  });
+  const bar = el.querySelector('.ibar');
+  return {w:+r.width.toFixed(2), h:+r.height.toFixed(2),
+          x:+r.left.toFixed(2), y:+r.top.toFixed(2), kids:kids,
+          barVis: !!(bar && bar.getBoundingClientRect().width > .5)};
+}
+
+function clearKid(k){
+  k.style.margin = '';
+  k.style.position = k.style.left = k.style.top = k.style.right = '';
+  k.style.width = k.style.transform = k.style.transition = '';
+  k.style.opacity = k.style.display = '';
+}
+
+let islandFrame = 0, islandMotion = null;
+let islandContentAnimations=[];
+let islandMorphTimer = null;
+let islandMorphEnd = null;
+
+/* 中止上一段 morph：只清状态，**不重画**。
+   重画会把"当前 class 的内容"再写一遍，而调用方下一步就要切 class。
+   连点时的关键就在这：上一段留下的绝对定位/transform/监听必须全部清掉，
+   否则新一段量到的"终态"其实是上一段的残留布局（这是连点 bug 的根因）。 */
+function resetMorph(el){
+  clearTimeout(islandMorphTimer);
+  cancelAnimationFrame(islandFrame);
+  islandContentAnimations.forEach(a=>a.cancel());islandContentAnimations=[];
+  el.querySelectorAll('.island-echo').forEach(n=>n.remove());
+  if(islandMorphEnd){ el.removeEventListener('transitionend', islandMorphEnd); islandMorphEnd = null; }
+  el.classList.remove('morphing', 'closing', 'go');
+  el.style.width = el.style.height = el.style.maxWidth = el.style.transition = el.style.borderRadius = '';
+  islandKids(el).forEach(k => { if(k) clearKid(k); });
+}
+
+function clearIslandMorph(el){
+  const big = el.classList.contains('big');
+  resetMorph(el);
+  /* ⚠ 解锁这一步必须先关过渡、强制落一帧、再放开（2026-10-20）。
+     清掉内联 width/height 后，interpolate-size 会让浏览器把 `px → auto` 当成
+     一段新的 800ms 过渡再跑一遍；这段过渡期间岛被当成"定宽"容器，内部 flex
+     会按定宽重新分行 —— 文字先跳到第二行（被 overflow 裁掉半行）、随后再弹回来。
+     用户实报的"最后几帧回弹卡一下 / 字体抽搐"就是这一帧。
+     加了 transition:none 之后的强制 reflow，自然布局一次性落定，不再产生新过渡。 */
+  el.style.transition = 'none';
+  drawIslandBody(big, true);          /* skipTick：收尾不许再排队段动画 */
+  /* 过渡期间若留下了段/整行动画的类，先清掉再强制 reflow ——
+     否则 .morphing 一摘，这些动画会在重排那一瞬开始（虽然同任务内就被清掉，但别留窗口）。 */
+  const txt = $('iText');
+  if(txt){
+    txt.classList.remove('swap');
+    txt.querySelectorAll('.sg.tick').forEach(n => n.classList.remove('tick'));
+  }
+  void el.offsetWidth;
+  el.style.transition = '';
+  /* 舞台期间攒下的最新意图：收尾后另起一帧再切，避免在 transitionend 里重入。 */
+  if(pendingBig !== null){
+    const want = pendingBig;
+    pendingBig = null;
+    if(want !== el.classList.contains('big')) setTimeout(() => drawIsland(), 0);
+  }
+}
+
+/* 把四个孩子钉在岛的**终态**排版坐标上（绝对定位，left/right/width 一步到位），
+   只让 top 跟着同一条弹簧走；岛的宽高由调用方锁成 px。
+   （曾试过整体 transform 位移：在受控时间轴里不跟宽度同步，验收直接炸；
+     left/top 是验证过同步的，横向位移靠岛的左边缘本身完成。） */
+function pinIsland(el, a, b, to){
+  islandKids(el).forEach((k, i) => {
+    if(!k) return;
+    const ka = a.kids[i], kb = b.kids[i];
+    const geo = (kb && kb.shown) ? kb : ((ka && ka.shown) ? ka : kb);
+    if(!geo) return;
+    const mode = ISLAND_KID_MODE[i] || 'lw';
+    const from=(to === 'start' && ka && ka.shown) ? ka : geo;
+    k.style.position = 'absolute';
+    /* ⚠ 必须把 margin 归零：量到的 top 里已经含了外边距，而绝对定位时
+       `margin-top` 仍会再加一遍（.island.big .idot 就有 5px）——
+       结果是绿点在整个过渡里低 5px，解锁那一帧再跳回来。字没有 margin，所以只有点抽。 */
+    k.style.margin = '0';
+    k.style.left = (mode === 'rw' ? 'auto' : from.left + 'px');
+    k.style.right = (mode === 'lw' ? 'auto' : from.right + 'px');
+    k.style.width = (mode === 'lr' ? 'auto' : geo.width + 'px');
+    /* 起态那一帧写"起点的 top"，目标帧写终态的 top —— 与岛的宽高同一条弹簧。
+       （曾试过改成 transform 位移想避免文字重采样，但它在受控时间轴里没有和宽度
+        同步推进，验收直接炸；left/top 是验证过同步的。） */
+    k.style.top = ((to === 'start' && ka && ka.shown) ? ka.top : geo.top) + 'px';
+    k.style.transform = '';
+    k.style.transition = (to === 'start') ? 'none' : '';
+  });
+}
+
+/* 返回 true = 走了 morph（调用方不要再直接改 class） */
+function morphIsland(el, open){
+  if(reduceMotion() || !el.offsetWidth) return false;
+  pendingBig = null;                            /* 新的这一段就是最新意图 */
+  /* 1) 先量起态：可能是上一段动画的中途（连点），量到的就是当前真实位置 */
+  const a = snapIsland(el);
+  const oldText=el.querySelector('.itexts');
+  const outgoing={html:oldText.innerHTML,opacity:parseFloat(getComputedStyle(oldText).opacity),
+    whiteSpace:getComputedStyle($('iText')).whiteSpace};
+  const oldRadius=Math.min(a.h/2,parseFloat(getComputedStyle(el).borderTopLeftRadius)||18);
+  /* 2) 清掉上一段的一切（监听 / 绝对定位 / transform / 内联宽高），DOM 回到自然态 */
+  resetMorph(el);
+  el.style.transition = 'none';                 /* 冻结几何：换 class 的瞬间不能开跑 */
+  el.classList.toggle('big', open);
+  drawIslandBody(open, true);                   /* 内容按终态渲染（过渡期间不排队段动画） */
+  /* 3) 量终态：此时孩子已回到文档流，量到的才是真正的目标布局 */
+  const b = snapIsland(el);
+  const targetRadius=Math.min(b.h/2,parseFloat(getComputedStyle(el).borderTopLeftRadius)||18);
+  el.classList.add('morphing');
+  if(!open) el.classList.add('closing');
+  /* 过渡期间"本该隐藏"的孩子要留在场上（靠透明度淡出/淡入），
+     但**只在起态真的有它**时才强制显示 —— 否则 ready 态（本来没有进度条）
+     会在字旁边闪出一条空灰槽。 */
+  if(a.barVis) $('iBarWrap').style.display = '';
+  $('iActs').style.display = 'flex';
+  /* 收起时进度条是"进场"的一方：起态必须先透明（这一帧 transition:none），
+     目标帧再写 1 —— 这样它是被揭开/淡入的，而不是在点击瞬间凭空冒出来。 */
+  if(!open) $('iBarWrap').style.opacity = '0';
+  /* 同一个阻尼系统驱动轮廓与内容；改向保留当前速度，而非重播预设曲线。 */
+  const previous = islandMotion;
+  pinIsland(el, a, b, 'start');
+  el.style.transition = 'none';
+  el.style.maxWidth = (Math.max(a.w, b.w) + Math.abs(b.w-a.w)*.09 + 2) + 'px';
+  const css=getComputedStyle(document.documentElement);
+  const omega=parseFloat(css.getPropertyValue('--island-omega'))||18;
+  const damping=parseFloat(css.getPropertyValue('--island-damping'))||29.5;
+  function channel(x, target, old){
+    return {x, target, v:old ? old.v : 0, omega, damping};
+  }
+  const m = islandMotion = {
+    w:channel(a.w,b.w,previous && previous.w),
+    h:channel(a.h,b.h,previous && previous.h),
+    radius:channel(oldRadius,targetRadius,previous && previous.radius),
+    kids:islandKids(el).map((k,i)=>{
+      if(!k) return null;
+      const ka=a.kids[i], kb=b.kids[i];
+      const geo=(kb && kb.shown) ? kb : ka;
+      if(!geo) return null;
+      k.style.transition='opacity .20s var(--ease-hover)';
+      return channel(ka && ka.shown ? ka.top : geo.top,geo.top,
+        previous && previous.kids[i]);
+    }),
+    sides:islandKids(el).map((k,i)=>{
+      if(!k)return null;
+      const ka=a.kids[i],kb=b.kids[i],geo=kb && kb.shown ? kb : ka;
+      if(!geo)return null;
+      const mode=ISLAND_KID_MODE[i]||'lw';
+      return {left:mode==='rw' ? null : channel(ka && ka.shown ? ka.left : geo.left,geo.left,
+          previous && previous.sides && previous.sides[i] && previous.sides[i].left),
+        right:mode==='lw' ? null : channel(ka && ka.shown ? ka.right : geo.right,geo.right,
+          previous && previous.sides && previous.sides[i] && previous.sides[i].right)};
+    }),
+    time:performance.now(), start:performance.now()
+  };
+  if(!open) $('iBarWrap').style.opacity='1';
+  el.classList.add('go');
+  /* Based on Motion Prompt #012 / #055: geometry and content have separate jobs.
+     Old content leaves first; new content settles in without scaling or blur.
+     MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#012 */
+  if(outgoing.html !== oldText.innerHTML && a.kids[1] && a.kids[1].shown){
+    const echo=document.createElement('span');echo.className='island-echo';
+    echo.setAttribute('aria-hidden','true');echo.inert=true;echo.innerHTML=outgoing.html;
+    Object.assign(echo.style,{position:'absolute',pointerEvents:'none',overflow:'hidden',
+      left:a.kids[1].left+'px',top:a.kids[1].top+'px',width:a.kids[1].width+'px'});
+    const echoText=echo.querySelector('.itext');if(echoText)echoText.style.whiteSpace=outgoing.whiteSpace;
+    el.appendChild(echo);
+    const exit=echo.animate([{opacity:outgoing.opacity},{opacity:0}],{duration:110,fill:'both'});
+    exit.onfinish=()=>echo.remove();
+    const enter=oldText.animate([{opacity:0,translate:'0 3px'},{opacity:1,translate:'0 0'}],
+      {duration:240,delay:80,easing:'cubic-bezier(.16,1,.3,1)',fill:'backwards'});
+    islandContentAnimations=[exit,enter];
+  }
+  function step(c,dt){
+    if(!c) return;
+    // Exact damped-spring solution: no refresh-rate-dependent Euler damping.
+    const decay=c.damping/2,frequency=Math.sqrt(c.omega*c.omega-decay*decay);
+    const offset=c.x-c.target,b=(c.v+decay*offset)/frequency;
+    const e=Math.exp(-decay*dt),cos=Math.cos(frequency*dt),sin=Math.sin(frequency*dt);
+    c.x=c.target+e*(offset*cos+b*sin);
+    c.v=e*((-decay*offset+frequency*b)*cos+(-decay*b-frequency*offset)*sin);
+  }
+  function paint(t){
+    if(islandMotion !== m) return;
+    if(reduceMotion()){ islandMotion=null; clearIslandMorph(el); return; }
+    const dt=Math.max(0,(t-m.time)/1000);m.time=t;
+    const channels=[m.w,m.h,m.radius,...m.kids,...m.sides.flatMap(s=>s ? [s.left,s.right] : [])];
+    channels.forEach(c=>step(c,dt));
+    el.style.width=m.w.x+'px'; el.style.height=m.h.x+'px';
+    // 胶囊到面板的角随高度自然展开，避免先变方再弹回。
+    el.style.borderRadius=Math.max(0,Math.min(m.h.x/2,m.radius.x))+'px';
+    islandKids(el).forEach((k,i)=>{
+      if(!k)return;
+      if(m.kids[i])k.style.top=m.kids[i].x+'px';
+      if(m.sides[i] && m.sides[i].left)k.style.left=m.sides[i].left.x+'px';
+      if(m.sides[i] && m.sides[i].right)k.style.right=m.sides[i].right.x+'px';
+    });
+    const settled=channels.filter(Boolean).every(c=>Math.abs(c.x-c.target)<.06 && Math.abs(c.v)<.35);
+    if(settled || t-m.start>1400){
+      el.style.width=b.w+'px'; el.style.height=b.h+'px';
+      el.style.borderRadius=''; islandMotion=null; clearIslandMorph(el); return;
+    }
+    islandFrame=requestAnimationFrame(paint);
+  }
+  // 首帧即显示当前几何；请求/状态变化可以从任何一帧接管。
+  el.style.width=a.w+'px'; el.style.height=a.h+'px';
+  islandFrame=requestAnimationFrame(paint);
+  return true;
+}
+
+/* ---------- 岛的绘制 ---------- */
+let lastDomBig = null;
+let lastMorphAt = 0;
+/* 舞台进行中又来了状态变化：先记下最新意图，收尾后再起下一段（不硬切）。 */
+let pendingBig = null;
+function islandNotice(){ return (notice && Date.now() < notice.until) ? notice : null; }
+/* 需要用户处理、岛必须**持续展开**的状态：返回该状态的键（空串 = 没有）。
+   这类条件不会自己消失（残留脚本 / 需要留意的警告 / 刷课途中登录过期）：
+   notify 的几秒到期后岛不能缩回去，要一直敞到条件解除，
+   或用户点掉（压制到条件再次变化为止）—— 以前它只收缩态挂一句小字，
+   该看到的时候恰恰看不到。 */
+function needsAttention(j){
+  if(!j) return '';
+  if(!j.alive && (j.strays || []).length) return 'stray';
+  if(j.warn && j.warn.text)return j.warn.text;
+  if(j.state === 'attention') return 'attention';
+  if(j.alive && j.page === 'login') return 'login-while-run';
+  return '';
+}
+let attentionKey = '';   /* 已被用户压制的注意键：同键不再自动展开 */
+function islandWantBig(){
+  if(islandNotice() || manualOpen) return true;
+  const k = needsAttention(lastStatus);
+  return !!k && k !== attentionKey;
+}
+function closeIslandManual(){
+  clearTimeout(manualCloseTimer);
+  manualOpen = false;
+}
+let lastIdent = '';
+let lastActsHtml = null;
+
+/* 动画结束必须把 class 摘掉。
+   两个关键帧都写了 filter，而 fill-mode:both 会把最后一帧（blur(0)）**永久**留在元素上 ——
+   数值上是 0，但 filter 不为 none 会让浏览器给这段文字单独开一个合成层，
+   文字的抗锯齿/亚像素渲染随之改变，看起来就是"字有点不一样了"。
+   摘掉 class，filter 才真的回到 none。 */
+$('iText').addEventListener('animationend', (e) => {
+  const t = e.target;
+  if(!t || !t.classList) return;
+  if(t.classList.contains('tick')) t.classList.remove('tick');
+  if(t.classList.contains('swap')) t.classList.remove('swap');
+});
+
+function drawIsland(force){
+  const el = $('island');
+  if(!needsAttention(lastStatus)) attentionKey = '';   /* 注意条件解除 → 解除压制 */
+  const big = islandWantBig();
+  if(lastDomBig !== null && (big !== lastDomBig || (force && big)) && el.offsetWidth){
+    if(morphIsland(el,big)){
+      pendingBig=null; lastMorphAt=Date.now(); lastDomBig=big; return;
+    }
+  }
+  /* 意图已经和当前 DOM 一致（例如舞台中途状态又翻回来了）：之前攒的意图作废，
+     否则收尾时会按旧意图再起一段、把最新状态又翻回去。 */
+  pendingBig = null;
+  lastDomBig = big;
+  el.classList.toggle('big', big);
+  drawIslandBody(big);
+}
+
+function drawIslandBody(big, morph){
+  const j = simpleView(lastStatus || {});
+  const useNotice = !!islandNotice();
+  const d = islandData(j);
+  const el = $('island');
+  /* 只有 att（需要处理）/ err（失败）两种强调底；状态点用 warn / err */
+  const mood = useNotice ? (islandNotice().cls || '') : (d.cls || '');
+  /* 用 classList 而不是重写 className：过渡期间 .morphing / .closing 必须留着，
+     3 秒一次的轮询不能把它们抹掉（抹掉就等于把锁定中的几何放回 auto）。 */
+  el.classList.toggle('att', mood === 'att' || mood === 'warn');
+  el.classList.toggle('err', mood === 'err');
+  const segs = useNotice ? [S('txt', notice.text)] : (big ? (d.segsFull || d.segs) : d.segs);
+  /* 按钮与信息必须匹配（用户反馈：关闭提示不该带「开始刷课」）：
+     - 手动点开岛 = 查看当前状态 → 给**状态对应**的按钮（就绪→开始刷课、未开始→接管 Edge…）
+     - notify() 提示  = 一次性告知 → 只给**提示自带**的按钮；没写就一颗都不给。
+       以前这里会回退到状态按钮，于是"控制台已关闭"也挂着「开始刷课」—— 牛头不对马嘴。 */
+  const acts = !big ? []
+    : useNotice ? (notice.actions || [])
+    : (d.actions || []);
+  const bar = (!big && d.bar != null) ? d.bar : null;
+  const txt = $('iText');
+  /* 过渡期间（.morphing）连轮询也不能触发段动画：renderSegs 为了重启 tick 会
+     逐段强制 reflow，正好插在宽高过渡中间 —— 掉帧。CSS 虽然能压住动画本身，
+     但压不住那次 reflow；所以这里提前把 morphing 算出来，统一走 skipTick。 */
+  const morphing = el.classList.contains('morphing');
+  const skipTick = !!morph || morphing;
+  const skeletonChanged = renderSegs(txt, segs, skipTick);
+  const dot = mood === 'err' ? 'err' : ((mood === 'att' || mood === 'warn') ? 'warn' : (d.dot || 'off'));
+  $('iDot').className = 'idot sdot ' + dot;
+  if(bar != null) $('iBar').style.width = bar + '%';
+  /* 过渡期间（.morphing）不要硬切 display、也不要把按钮行清空：
+     那样第一帧就消失了，留下一块空洞。显隐交给 CSS 的 opacity，淡出被边缘吃掉。 */
+  if(!morphing) $('iBarWrap').style.display = bar == null ? 'none' : '';
+  /* 按钮组的 markup 没变就不要重写 innerHTML：重写等于把节点全换掉，
+     浏览器会重新合成一遍 —— 那就是"收尾闪一下"（尤其带按钮的那几种状态）。
+     用一份缓存比对，只有真的换了内容才动 DOM。 */
+  const actsHtml = acts.map(a => '<button class="mini' + (a.ghost ? ' ghost' : '') +
+    '" data-k="' + esc(a.k) + '" type="button">' + esc(a.label) + '</button>').join('');
+  if((!morphing || acts.length) && actsHtml !== lastActsHtml){
+    $('iActs').innerHTML = actsHtml;
+    lastActsHtml = actsHtml;
+  }
+  /* 整行换内容（换讲/换状态）才播 swap；纯数字变化在上面已经由 segTick 处理掉了。
+     swap 挂在 .itext 上而不是 .itexts 上：.island.big .itexts 已经占用了 animation
+     通道（islandFocus 运动模糊），挂在外层会被它整个顶掉。 */
+  /* 身份（点色 / 强调类 / 提示原文 / 第几讲 / 讲名）没变 = 只是"同一个状态换了措辞"
+     （收缩 ↔ 展开）。这时绝不能播整行 swap —— 否则一镜到底会被"整行重新对焦"破坏。
+     真正换讲、换状态时身份一定变，swap 照旧；纯数字变化本来就由 segTick 处理。 */
+  const ident = [d.dot, d.cls, useNotice ? islandNotice().text : '',
+                 (j.current && j.current.index) || 0,
+                 (j.current && j.current.name) || ''].join('|');
+  if(skeletonChanged && !skipTick && ident !== lastIdent){
+    txt.classList.remove('swap'); void txt.offsetWidth; txt.classList.add('swap');
+  }
+  lastIdent = ident;
+  /* 过渡期间内容变长了（新提示、换讲、轮询）而锁定宽度没变 —— 文字会被裁在边上、
+     看起来就是"岛变小了"。这里量一下内容是否已经放不下：放不下就立刻以当前几何
+     为起点重起一段（resetMorph 保证零跳变）。只在真的放不下时才动，轮询不会触发。 */
+  if(!morph && skeletonChanged && el.classList.contains('morphing')){
+    const it = el.querySelector('.itext'), its = el.querySelector('.itexts');
+    if(it && its && it.scrollWidth > its.clientWidth + 1) morphIsland(el, big);
+  }
+}
+function notify(text, ms, cls, actions){
+  const detail=LiruInterface.message(text);
+  if(detail.detail){text=detail.title;actions=[...(actions || []).filter(a=>a.k!=='details'),{k:'details',label:'详细原因'}];}
+  if(!text) return;               /* 空文本不弹提示（act 成功且无 msg 时会传空串） */
+  notice = {detail:detail.detail,text:text, until:Date.now() + (ms || 4000), cls:cls || '', actions:actions || null};
+  drawIsland(true);
+  clearTimeout(notifyTimer);
+  notifyTimer = setTimeout(() => { notice = null; drawIsland(); }, (ms || 4000) + 60);
+}
+$('iActs').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if(!b) return;
+  e.stopPropagation();
+  const k = b.dataset.k;
+  if(k==='details')return LiruInterface.showDetails(notice && notice.detail || lastStatus && lastStatus.warn && lastStatus.warn.text || '');
+  if(k === 'dismiss'){
+    notice = null;
+    /* 同时压住持续注意条件：否则刚点掉又因 needsAttention 弹开，点不掉 */
+    attentionKey = needsAttention(lastStatus) || attentionKey;
+    closeIslandManual();
+    drawIsland();
+    return;
+  }
+  if(k === 'reload') return location.reload();
+  if(k === 'restart') return restartConsole();
+  if(k === 'edge')  return act('/api/attach-edge', $('btnEdge'), '正在连接已有 Edge…');
+  if(k === 'start') return act('/api/start', $('btnStart'), '正在启动…', scopeSel);
+  if(k === 'scan') return act('/api/scan', $('btnScan'), '正在核对每一讲…');
+  if(k === 'stop')  return act('/api/stop', $('btnStop'), '正在结束残留脚本…');
+  if(k === 'review') return LiruInterface.showReview(lastStatus || {});
+  if(k === 'quit')  return $('btnQuit').click();
+});
+$('island').onclick = () => {
+  /* 有提示条时，第一下点击先“确认提示”并收起。
+     旧逻辑只有 manualUntil，提示本身仍强制 big —— 连点看起来完全没反应（用户实报）。 */
+  const ak = needsAttention(lastStatus);
+  if(notice){
+    notice = null;
+    clearTimeout(notifyTimer);
+    /* 同时压住持续注意条件：否则刚收下又弹开，等于点不掉 */
+    if(ak) attentionKey = ak;
+    closeIslandManual();
+    drawIsland(true);
+    return;
+  }
+  /* 展开是"需要注意"顶起来的（既非手动、也非提示条）：第一下 = 收起并压制，
+     不能当手动展开翻回去 —— 否则这个展开永远收不掉。 */
+  if(ak && !manualOpen && $('island').classList.contains('big')){
+    attentionKey = ak;
+    drawIsland(true);
+    return;
+  }
+  manualOpen = !manualOpen;
+  clearTimeout(manualCloseTimer);
+  if(manualOpen){
+    manualCloseTimer = setTimeout(() => {
+      manualOpen = false;
+      drawIsland(true);
+    }, 9000);
+  }
+  /* 快速连点只合并成一次最终 morph：40ms 内的第二、第三下不再各起一段 800ms 弹簧，
+     避免中途反复打断造成视觉“抽”一下。单点 45ms 后才展开，肉眼看不出延迟。 */
+  clearTimeout(islandClickTimer);
+  islandClickTimer = setTimeout(() => drawIsland(true), 45);
+};
+
+/* ---------- 动作（防重入） ---------- */
+let busy = false, simplePending = '', simpleScan = null, simpleLost = false, simpleScanNotifiedAt = 0;
+let simpleStartWait=0,simpleStartError=0,simpleStartResultTimer=0;
+/* r75 按钮文案换值：与 setNum 的 numTick 同一语言 —— 只在真的变了时播一次
+   320ms 的"上移对焦"，「停止 → 再点一次确认停止」这类切换不再硬跳。 */
+function swapText(el, txt){
+  if(el)el=el.querySelector('.lbl') || el;
+  txt = String(txt == null ? '' : txt);
+  if(!el || el.textContent === txt) return;
+  el.textContent = txt;
+  el.classList.remove('numTick'); void el.offsetWidth; el.classList.add('numTick');
+}
+function simpleView(j){ return LiruPoll.presentation(j, simpleScan ? 'scan' : simplePending || (simpleStartWait && !(j && j.alive) ? 'start' : '')); }
+function simpleStartResult(ok){
+  const b=$('btnStart');clearTimeout(simpleStartResultTimer);simpleStartWait=0;
+  simpleStartError=ok ? 0 : Date.now()+2000;
+  b.classList.toggle('ok',ok);LiruFeedback.receipt(b,ok ? 'ok' : 'error');
+  b.querySelectorAll('.ck path,.ec path').forEach(p=>{p.style.strokeDashoffset=reduceMotion() ? '0' : '';});
+  simpleStartResultTimer=setTimeout(()=>{b.classList.remove('ok');simpleStartError=0;if(lastStatus)render(lastStatus);},ok ? 1400 : 2000);
+}
+function updateSimpleStart(j){
+  if(!simpleStartWait)return;
+  if(j.alive){
+    if(!['starting','scanning','edge'].includes(j.state))simpleStartResult(true);
+    else simpleStartWait=Date.now()+12000;
+    return;
+  }
+  if(Date.now()>simpleStartWait){simpleStartResult(false);notify('还没收到启动结果，请查看提示后重试',6500,'att');}
+}
+function renderSimpleStart(j){
+  const b=$('btnStart'),scanning=j.state==='scanning' || !!j.scan_proc;
+  const transient=simplePending==='stop' ? 'stopping' : scanning ? 'scanning'
+    : j.state==='starting' ? 'starting' : j.state==='edge' ? 'connecting' : '';
+  const running=!!j.alive && !transient;
+  const phase=transient || (running ? (b.classList.contains('ok') ? 'success' : 'running')
+    : simpleStartError>Date.now() ? 'error' : startReady(j) ? 'ready' : 'disabled');
+  b.dataset.phase=phase;
+  b.classList.toggle('running',running);b.classList.toggle('loading',!!transient);
+  b.classList.toggle('error',phase==='error');
+  if(!running && !simpleStartWait)b.classList.remove('ok');
+  b.setAttribute('aria-busy',String(!!transient));
+  const labels={stopping:'正在停止…',scanning:'正在识别…',starting:'正在启动…',connecting:'正在连接…',
+    running:'正在刷课',success:'已开始',error:'启动失败，重试',ready:'开始刷课',disabled:'开始刷课'};
+  swapText(b,labels[phase]);
+  const pct=j.progress && j.progress.pct,known=pct != null && Number.isFinite(Number(pct));
+  const measured=known ? Math.max(0,Math.min(100,Number(pct))) : null;
+  b.style.setProperty('--run-progress',known ? measured+'%' : '0%');
+  b.querySelector('.runpct').textContent=known ? measured+'%' : '运行中';
+}
+function updateSimpleScan(j){
+  if(!simpleScan) return;
+  const a=simpleScan;
+  if(j.alive || j.scan_proc || j.state === 'scanning' || j.state === 'starting') a.seen=true;
+  const ended=!j.alive && !j.scan_proc && j.state !== 'scanning' && j.state !== 'starting';
+  if(ended && j.scanned && (a.seen || (j.scan_at && j.scan_at !== a.at))){
+    simpleScan=null;
+    LiruFeedback.receipt($('btnScan'),'ok');
+    simpleScanNotifiedAt=Date.now();
+    const n=Number(j.unverified_count)||0;
+    notify(n ? '识别完成，视频清单已更新；'+LiruInterface.reviewText(j) : '重新识别完成，待刷清单已更新',6000,'',n ? [{k:'review',label:'查看内容'}] : []);
+  } else if(ended && a.seen && !j.scanned){
+    simpleScan=null;
+    LiruFeedback.receipt($('btnScan'),'error');
+    simpleScanNotifiedAt=Date.now();
+    notify('识别没完成：'+((j.warn && j.warn.text)||'请查看登录窗口'),7000,'att');
+  } else if(Date.now()-a.started>60000){
+    simpleScan=null;
+    notify('识别还没返回结果，稍后再看',6000,'att');
+  }
+}
+async function act(url, btn, busyText, body){
+  if(busy || simpleLost) return;
+  busy=true;
+  LiruFeedback.clear(btn,true);
+  if(url==='/api/start'){
+    simpleStartError=0;clearTimeout(simpleStartResultTimer);$('btnStart').classList.remove('ok','error');
+  }
+  simplePending=url === '/api/scan' ? 'scan' : url === '/api/attach-edge' ? 'edge'
+    : url === '/api/start' ? 'start' : 'stop';
+  if(simplePending === 'scan') simpleScan={at:(lastStatus || {}).scan_at || '',seen:false,started:Date.now()};
+  const label=btn ? btn.querySelector('.lbl') || btn : null;
+  const old=label ? label.textContent || '' : '';
+  if(lastStatus) render(lastStatus);
+  if(btn){btn.disabled=true;btn.classList.add('loading');btn.setAttribute('aria-busy','true');}
+  if(label) swapText(label,busyText);
+  notify(busyText,7000);
+  const ctrl=new AbortController(), timer=setTimeout(()=>ctrl.abort(),25000);
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body || {}),signal:ctrl.signal});
+    const j=await r.json();
+    if(!j.ok){ simpleScan=null; if(url==='/api/start')simpleStartResult(false);else LiruFeedback.receipt(btn,'error');notify('没成功：'+(j.msg || ''),8000,'err'); }
+    else {
+      if(url !== '/api/scan' && url !== '/api/start')LiruFeedback.receipt(btn,'ok');
+      /* 回执后继续等待实际运行证据；updateSimpleStart 确认后才描勾。 */
+      if(url === '/api/start' && btn && btn.id === 'btnStart'){
+        simpleStartWait=Date.now()+12000;
+      }
+      if(simplePending !== 'scan') notify(j.msg || '操作已完成',4000);
+    }
+  } catch(e){ simpleScan=null;if(url==='/api/start')simpleStartResult(false);else LiruFeedback.receipt(btn,'error');notify('操作没成功：'+e.message,8000,'err'); }
+  finally{
+    clearTimeout(timer);
+    if(btn){btn.classList.remove('loading');btn.removeAttribute('aria-busy');}
+    if(label) swapText(label,old);
+    busy=false;simplePending='';
+    if(lastStatus) render(lastStatus);
+    poll(true);
+  }
+}
+$('btnEdge').onclick  = () => act('/api/attach-edge', $('btnEdge'), '正在连接已有 Edge…');
+$('btnStart').onclick = () => act('/api/start', $('btnStart'), '正在启动…', scopeSel);
+/* 停止：两步确认（防误触），4 秒内再点一次才真的停 */
+let stopArm = 0, stopTimer = null;
+$('btnStop').onclick = () => {
+  const btn = $('btnStop');
+  if(Date.now() > stopArm){
+    stopArm = Date.now() + 4000;
+    btn.classList.add('arm'); swapText(btn,'再点一次确认停止');
+    notify('再点一次「停止」确认（4 秒内）', 4200);
+    clearTimeout(stopTimer);
+    stopTimer = setTimeout(() => {
+      if(Date.now() > stopArm){ stopArm = 0; btn.classList.remove('arm'); swapText(btn,'停止'); }
+    }, 4100);
+    return;
+  }
+  clearTimeout(stopTimer); stopArm = 0;
+  btn.classList.remove('arm'); swapText(btn,'停止');
+  act('/api/stop', btn, '正在保存进度并停止…');
+};
+
+/* 关闭控制台：两步确认；后端先优雅停刷课，再退出服务自己 */
+let quitting = false, quitArm = 0, quitTimer = null;
+const quitHTML = $('btnQuit').innerHTML;
+function quitReset(){
+  if(quitting) return;
+  quitArm = 0;
+  $('btnQuit').classList.remove('arm');
+  $('btnQuit').innerHTML = quitHTML;
+}
+
+/* 自动关闭：保留 v1.3/v1.4 的 close + self 重试。
+   Edge/Chrome 通常允许脚本关闭由脚本创建或只有一条历史的标签页。
+   浏览器拦截退出时，显示 Ctrl+W 快捷键。 */
+let byeShown = false, pageGone = false;
+function showByeScreen(title, note){
+  if(byeShown || pageGone) return;
+  byeShown = true;
+  if(title) $('byeTitle').textContent = title;
+  if(note) $('byeNote').innerHTML = note;
+  const b = $('bye');
+  if(b) b.hidden = false;
+  document.body.style.pointerEvents = '';        // 收尾页上的按钮要能点
+}
+
+/* 「重启控制台」：给"页面是新的、后端是旧的"这种错位准备的一键出口。
+   为什么会有这种错位：页面每次 GET / 都从磁盘读（刷新就最新），后端却是常驻进程
+   （改了 webui.py 必须重启）。新版后端会声明 caps，页面据此发现问题。
+   /api/close-console 是**老后端也一直有**的接口，所以这条路对旧后端一样管用。 */
+async function restartConsole(){
+  if(quitting) return;
+  quitting=true;clearTimeout(quitTimer);
+  await LiruExit.run({button:$('btnQuit'),running:!!(lastStatus && lastStatus.alive),
+    completeTitle:'请重新打开控制台',completeNote:'双击桌面上的「打开控制台」继续',onClosed:()=>LiruExit.showShortcut(),
+    onFailed:error=>{quitting=false;quitReset();notify('关闭没有完成：'+error.message,7000,'err',[{k:'restart',label:'再试一次'}]);poll(true);}
+  });
+}
+function closeSelf(){
+  if(pageGone) return;
+  try{ window.close(); }catch(e){}
+  // 与 v1.3/v1.4 相同的兼容重试；最终仍留可用的键盘出口。
+  setTimeout(() => {
+    if(pageGone)return;
+    try{window.open('', '_self');window.close();}catch(e){}
+    setTimeout(()=>{if(!pageGone){if(LiruExit.active())LiruExit.showShortcut();else showByeScreen();}},320);
+  },260);
+}
+
+$('btnQuit').onclick = async () => {
+  if(quitting)return;
+  if(Date.now()>quitArm){
+    quitArm=Date.now()+4000;$('btnQuit').classList.add('arm');
+    swapText($('btnQuit'),lastStatus && lastStatus.alive ? '再次点击：停止并关闭' : '再次点击：确认关闭');
+    notify('再次点击「关闭控制台」即可确认',4200);clearTimeout(quitTimer);quitTimer=setTimeout(quitReset,4100);return;
+  }
+  quitting=true;clearTimeout(quitTimer);
+  await LiruExit.run({button:$('btnQuit'),running:!!(lastStatus && lastStatus.alive),onClosed:closeSelf,
+    onFailed:error=>{quitting=false;$('btnQuit').disabled=false;quitReset();notify('关闭没有完成：'+error.message,7000,'err');poll(true);}
+  });
+};
+$('btnHow').onclick = () => {
+  const d = $('howBox');
+  setHow(!(d._howTarget == null ? d.open : d._howTarget),true);
+};
+/* #052: Keep the details open during its exit; latest input owns the final state. */
+function setHow(open,scroll){
+  const d=$('howBox'),summary=d.querySelector('summary');
+  const start=d.getBoundingClientRect().height;
+  if(d._howAnimation)d._howAnimation.cancel();
+  d._howTarget=open;d.open=true;
+  const end=open ? d.getBoundingClientRect().height : summary.getBoundingClientRect().height+
+    parseFloat(getComputedStyle(d).paddingTop)+parseFloat(getComputedStyle(d).borderTopWidth);
+  const finish=()=>{d.open=open;d.style.overflow='';d._howAnimation=null;d._howTarget=null;};
+  if(reduceMotion() || !d.animate)finish();
+  else{
+    d.style.overflow='hidden';
+    const a=d.animate([{height:start+'px'},{height:end+'px'}],{duration:open ? 350 : 320,easing:'cubic-bezier(.65,0,.35,1)'});
+    d._howAnimation=a;a.onfinish=finish;
+  }
+  $('btnHow').classList.toggle('on',open);
+  $('btnHow').setAttribute('aria-expanded',String(open));
+  summary.setAttribute('aria-expanded',String(open));
+  if(open && scroll)d.scrollIntoView({behavior:reduceMotion() ? 'auto' : 'smooth',block:'nearest'});
+}
+$('howBox').querySelector('summary').addEventListener('click',e=>{
+  e.preventDefault();const d=$('howBox');setHow(!(d._howTarget == null ? d.open : d._howTarget),false);
+});
+/* 「重新识别」：只识别、不播放。跑完引擎会重写 课程结构.json，
+   下一轮 poll 就把"还剩几讲"和范围菜单刷新成最新的。
+   交给用户手动触发而不是定时自动跑 —— 识别会附着你的浏览器、也要几十秒，
+   定时偷偷跑会干扰你正在做的事。 */
+$('btnScan').onclick = () => act('/api/scan', $('btnScan'), '正在重新识别…');
+
+/* ---------- 刷课范围 ---------- */
+let scopeSel = { mode:'forward', chapter:'' };
+let scopeOpen = false;
+function syncMenu(){
+  const menu=$('scopeMenu');
+  const opening=scopeOpen && !menu.classList.contains('open');
+  if(opening){
+    menu.querySelectorAll('.mitem').forEach(row=>{row.classList.remove('vin');row.style.removeProperty('--mi');});
+  }
+  if(!scopeOpen && menu.contains(document.activeElement))$('scopeBtn').focus();
+  menu.inert=!scopeOpen;
+  menu.setAttribute('aria-hidden',String(!scopeOpen));
+  $('scopeMenu').classList.toggle('open', scopeOpen);
+  $('scopeBtn').classList.toggle('open', scopeOpen);
+  $('scopeBtn').setAttribute('aria-expanded', scopeOpen ? 'true' : 'false');
+  if(opening && !matchMedia('(prefers-reduced-motion:reduce)').matches){
+    // 只为当前滚动视口里的行编排；第一条可见行从0开始，视口外行直接保持终态。
+    const top=menu.scrollTop,bottom=top+menu.clientHeight;
+    const visibleRows=Array.from(menu.querySelectorAll('.mitem')).filter(row=>{
+      const y=row.offsetTop;
+      return y+row.offsetHeight>top+1 && y<bottom-1;
+    });
+    visibleRows.forEach((row,index)=>{
+      row.style.setProperty('--mi',index);row.classList.add('vin');
+    });
+  }
+}
+function chaptersForMenu(j){
+  return (j.chapters || []).filter(c => !c.known || c.remain > 0);
+}
+function scopeLabel(j){
+  if(scopeSel.mode === 'chapter' && scopeSel.chapter){
+    const c = (j.chapters || []).find(x => x.name === scopeSel.chapter);
+    const left = (c && c.known && c.remain != null) ? '（剩 ' + c.remain + ' 讲）' : '';
+    return shortName(scopeSel.chapter) + left;
+  }
+  return '从当前讲刷到课程结束';
+}
+/* 「还剩几讲」来自引擎**上次运行**时写的快照，不是实时值（引擎只写、不读它）。
+   所以必须把快照的时间摆出来，并告诉用户"想马上刷新该点哪里"。 */
+function courseStamp(j){
+  const t = String(j.course_time || '');
+  if(t.length < 19) return '';
+  const day = t.slice(0, 10), hm = t.slice(11, 16);
+  const now = new Date(), pad = n => String(n).padStart(2, '0');
+  const today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  const when = (day === today) ? ('今天 ' + hm) : (day + ' ' + hm);
+  let ageH = NaN;
+  try { ageH = (now - new Date(day + 'T' + t.slice(11, 19))) / 3600000; } catch(e){}
+  /* 超过 6 小时（或时间戳看不懂）就明说"可能已过期"：完成状态是会长腿的 ——
+     用户在平台网页上自己看完一讲、老师新加了资源，界面拿旧数据当现状就是在误导。 */
+  if(!(ageH < 6))
+    return ' · ' + when + ' 的结果可能已过期，请重新识别';
+  return ' · 识别于 ' + when;
+}
+function renderScope(j){
+  const chapters = chaptersForMenu(j);
+  const menu = $('scopeMenu');
+  const sig = chapters.map(c => c.name + c.remain + c.current).join('|') + '#' + scopeSel.mode + scopeSel.chapter;
+  if(menu.dataset.sig !== sig){
+    const scrollTop=menu.scrollTop;
+    menu.dataset.sig = sig;
+    menu.innerHTML = '';
+    const add = (mode, chapter, label, num, on) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mitem' + (on ? ' on' : '');
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected',String(on));
+      b.innerHTML = '<span class="chk"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true">' +
+        '<path d="M4.4 10.5l3.5 3.5L15.6 6.2" stroke="currentColor" stroke-width="2.2" ' +
+        'stroke-linecap="round" stroke-linejoin="round"/></svg></span>' +
+        '<span class="nm">' + esc(label) + '</span>' +
+        (num != null ? '<span class="n num">剩 ' + num + ' 讲</span>' : '');
+      b.onclick = (e) => {
+        e.stopPropagation();
+        scopeSel = { mode:mode, chapter:chapter };
+        scopeOpen = false; syncMenu(); renderScope(lastStatus || {});
+      };
+      menu.appendChild(b);
+    };
+    add('forward', '', '从当前讲刷到课程结束', null, scopeSel.mode === 'forward');
+    chapters.forEach(c => add('chapter', c.name,
+      shortName(c.name) + (c.current ? '（当前章）' : ''), c.known ? c.remain : null,
+      scopeSel.mode === 'chapter' && scopeSel.chapter === c.name));
+    if(!menu.querySelector('.on')) scopeSel = { mode:'forward', chapter:'' };
+    menu.scrollTop=scrollTop;
+  }
+  swapText($('scopeTxt'),scopeLabel(j));
+  const stray = !!(j.strays || []).length;
+  const scanning=j.state === 'scanning' || !!j.scan_proc;
+  $('scopeBtn').disabled = simpleLost || stray || !!simpleStartWait || (!scanning && (!!j.alive || busy));
+  syncMenu();
+  const hint = $('rangeHint');
+  const unknown = chapters.filter(c => !c.known).length;
+  const stamp = courseStamp(j);
+  if(!hasCap(j, 'scan')) hint.textContent = '请重新打开控制台，再使用「重新识别」';
+  else if(j.state === 'scanning' || !!j.scan_proc) hint.textContent = '正在重新识别，范围下次开始时生效';
+  else if(j.alive) hint.textContent = '正在刷课，范围下次开始时生效';
+  else if(!chapters.length && (j.chapters || []).length) hint.textContent = '所有章节都已经刷完了';
+  else if(scopeSel.mode === 'forward') hint.textContent = '从当前讲继续，自动跳过已完成视频' + stamp;
+  else if(scopeSel.mode === 'chapter') hint.textContent = '依次播放本章未完成视频' + stamp;
+  else if(unknown) hint.textContent = '开刷后会自动核对每一讲，核对完就显示还剩几讲';
+  else hint.textContent = '选一章刷完它';
+}
+$('scopeBtn').onclick = (e) => { e.stopPropagation(); scopeOpen = !scopeOpen; syncMenu(); };
+/* 「点别处就收起」统一收口在 capture 阶段。
+   以前只管菜单、且挂在冒泡阶段 —— 岛上的动作按钮等组件会 stopPropagation，
+   冒泡监听被拦掉，点那些地方菜单/岛都收不起来（用户反馈"应该点别的地方关闭"）。
+   capture 先于一切组件处理器跑，上面两件事就都管得到了。 */
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  const inIsland = t && t.closest && t.closest('#island');
+  /* 灵动岛：有提示/手动展开时，点岛外面 → 立即收起（不等计时器）。
+     点岛内部不动 —— 展开收起与动作按钮由岛自己的处理器管。 */
+  if(!inIsland && (notice || manualOpen)){
+    notice = null; closeIslandManual(); clearTimeout(islandClickTimer); clearTimeout(notifyTimer); drawIsland();
+  }
+  /* 刷课范围菜单：点 .range 之外 → 收起。芯片与菜单项都在 .range 里，
+     各自的 toggle/选中逻辑不受影响。 */
+  if(scopeOpen && !(t && t.closest && t.closest('.range'))){
+    scopeOpen = false; syncMenu();
+  }
+}, true);
+document.addEventListener('keydown', (e) => {
+  if(e.key !== 'Escape') return;
+  if(notice || manualOpen){
+    notice = null; closeIslandManual(); clearTimeout(islandClickTimer); clearTimeout(notifyTimer); drawIsland();
+  }
+  if(scopeOpen){ scopeOpen = false; syncMenu(); }
+});
+
+/* ---------- 左栏：三步引导 ---------- */
+function setStep(el, done, now){
+  const entering=now && !el.classList.contains('now');
+  el.className = 'step' + (done ? ' done' : '') + (now ? ' now' : '');
+  el.querySelector('.sn').textContent = done ? '✓' : el.dataset.n;
+  if(entering && !reduceMotion() && el.animate){
+    if(el._stepAnimation)el._stepAnimation.cancel();
+    el._stepAnimation=el.animate([{opacity:0,translate:'-6px 0'},{opacity:1,translate:'0 0'}],
+      {duration:300,easing:'cubic-bezier(.16,1,.3,1)'});
+  }
+}
+function renderGuide(j){
+  const scanning = j.state === 'scanning' || !!j.scan_proc;
+  const needVideo = scopeSel.mode === 'forward' || scopeSel.mode === 'current';
+  const navigable = j.page === 'video' || j.page === 'course';
+  const s1 = !!j.cdp_up;                      /* ① Edge 已连接 */
+  const s2 = needVideo ? j.page === 'video' : navigable;   /* ② 章节/整课模式至少要课程页 */
+  /* ③ 核对进度：正在核对（蓝圈），或已经核对过（打勾）。
+     使用后端的扫描回执和业务状态；接管授权由独立适配器管理，
+     不代表已经核对过课程。 */
+  // attention 也是引擎在跑（等待人工确认），不能把用户引导去点被禁用的「重新识别」。
+  const busy = j.state === 'running' || j.state === 'starting' || j.state === 'attention';
+  const s3 = !!j.scanned || busy || (!needVideo && navigable);   /* 章节/整课模式课程页即可 */
+  setStep($('st1'), s1, !s1);
+  setStep($('st2'), s2, s1 && !s2);
+  setStep($('st3'), s3, scanning);
+  setStep($('st4'), busy, s1 && s2 && s3 && !busy);
+  $('leadLine').innerHTML = scanning ? '正在重新核对每一讲的完成情况，<em>稍等就好</em>。'
+    : (busy ? '正在刷课，<em>窗口可以最小化</em>。'
+    : (s3 ? '进度核对好了，<em>点「开始刷课」</em>。'
+    : (s2 ? '接着点「重新识别」，<em>看清各章还剩几讲</em>。'
+    : (s1 ? 'Edge 已连接，<em>接下来在 Edge 中点开要刷的那一讲</em>。'
+    : '四步就绪，<em>剩下交给它</em>。'))));
+}
+
+/* ---------- 右栏：进度面板 ---------- */
+/* 大 = 「正在看的那一讲」的进度（大数字 + 大进度条），小 = 本轮讲次进度 ——
+   用户要求：看视频时最关心的是"这一讲还要多久"，所以本讲进度占主位；
+   "刷到第几讲"是背景信息，收到下面一行小字。空闲（没在播放）时维持原样：
+   大数字显示本轮已完成数（那时没有"本讲"可显示）。 */
+/* 只有真的变了才重播"换值"动效：3 秒一次轮询不该让人眼花。
+   百分比把符号拆出来单独降一档（38 是主体、% 是单位），换值时也只换数字那半。 */
+function setNum(el, txt, tick){
+  if(!el || el.dataset.v === txt) return;
+  el.dataset.v = txt;
+  const m = /^(-?[\d.]+)(%?)$/.exec(txt);
+  if(m && m[2]) el.innerHTML = '<span class="pn">' + m[1] + '</span><span class="pu">' + m[2] + '</span>';
+  else el.textContent = txt;
+  /* 时长这种"每 3 秒都在变"的数不播换值动效 —— 否则整块仪表每 3 秒抖一下。
+     只给"跨了一档"的百分比/讲数播。 */
+  if(tick === false) return;
+  el.classList.remove('numTick'); void el.offsetWidth; el.classList.add('numTick');
+}
+let deckWasLive = false;
+function renderHero(j){
+  /* 运行中：左栏的"开机向导"已经没用了（四步全绿只是反复告诉你"做完了"），
+     收起来把面积让给进度与操作。用 class 驱动，收起才是可过渡的。 */
+  const ops = document.querySelector('.ops');
+  if(ops) ops.classList.toggle('live', !!j.alive);
+  const cur = j.current, p = j.progress || {};
+  const scanning = j.state === 'scanning' || !!j.scan_proc;
+  const runView = !!j.alive && !!(cur && cur.name);
+  const done = j.done_count || 0;
+  const planned = j.planned || 0;
+  /* 顶栏底边的细线始终 = 本轮整体完成度（它是"整场"的进度，与大面板的本讲进度是两回事） */
+  const roundPct = (planned && done) ? Math.round(done / planned * 100) : 0;
+  $('tbProg').style.width = (j.alive && planned) ? roundPct + '%' : '0';
+  let deckPct = roundPct;
+  if(runView && p.pct != null){
+    setNum($('doneNum'), p.pct + '%');
+    setNum($('planNum'), (p.cur != null && p.dur) ? (' ' + mmss(p.cur) + ' / ' + mmss(p.dur)) : '', false);
+    $('pgCap').textContent = '本讲进度';
+    deckPct = p.pct;
+    $('track').className = 'track live';
+  } else {
+    const pct = (planned && done) ? Math.round(done / planned * 100) : 0;
+    setNum($('doneNum'), runView || done ? String(done) : '—');
+    setNum($('planNum'), planned ? ('/ ' + planned + ' 讲') : '/ — 讲');
+    $('pgCap').textContent = runView ? '本轮已完成' : (done ? '上一轮完成' : '本轮已完成');
+    deckPct = pct;
+    $('track').className = 'track' + (j.alive ? ' live' : '');
+  }
+  /* 游标与轨道共用同一条 .6s 过渡，不会各走各的。 */
+  $('bar').style.width = deckPct + '%';
+  $('track').style.setProperty('--p', deckPct + '%');
+  /* 未开始 → 刷课中：仪表"点亮"一次（blur 对焦 + 上浮，一次性，不循环） */
+  const liveNow = !!(j.alive && runView);
+  if(liveNow !== deckWasLive){
+    deckWasLive = liveNow;
+    const deck = $('deck');
+    deck.classList.remove('lit'); void deck.offsetWidth;
+    if(liveNow) deck.classList.add('lit');
+  }
+  if(scanning){
+    /* 识别期间不显示"第 N/M 讲"—— 那会说成"正在播放某一讲"，而它只是在核对 */
+    $('curLine').textContent = '正在重新核对每一讲的完成情况…';
+  } else if(runView){
+    /* cur.index 为 0 = 后端从课程结构/页面标题**推**出来的讲次，不是引擎报的序号。
+       这时硬写「第 0/3 讲」会露馅，所以只显示章节 + 讲次名（信息是真的，序号不编）。 */
+    const seq = cur.index ? '<span class="tag acc">第 ' + cur.index + '/' + cur.total + ' 讲</span>' : '';
+    $('curLine').innerHTML = seq +
+      (cur.chapter_short ? '<span class="tag">' + esc(cur.chapter_short) + '</span>' : '') + esc(cur.name);
+  } else {
+    $('curLine').textContent = done ? '上一轮已完成 ' + done + ' 讲' : '还没有开始，左边点「开始刷课」就行';
+  }
+  /* 小字行：播放中 = 本轮讲次进度；其余状态 = 占位 */
+  if(runView && planned){
+    const left = Math.max(planned - done, 0);
+    $('pgMeta').innerHTML = '<span>本轮进度 <b class="num">' + done + ' / ' + planned + ' 讲</b></span>' +
+      '<span>还剩 <b class="num">' + left + ' 讲</b></span>';
+  } else if(runView){
+    $('pgMeta').innerHTML = '<span>正在播放</span>';
+  } else if(scanning){
+    $('pgMeta').innerHTML = '<span>正在核对每一讲的完成情况</span>';
+  } else {
+    $('pgMeta').innerHTML = planned
+      ? '<span>本轮 <b class="num">' + done + ' / ' + planned + ' 讲</b></span>'
+      : '<span>本讲 <b class="num">—</b></span><span>当前进度 <b class="num">—</b></span>';
+  }
+}
+
+/* ---------- 右栏：讲次清单 ---------- */
+let prevStatus = {}, lastItemsKey = null;
+function statusCls(st){
+  if(st === '已完成') return 'done';
+  if(st === '播放中' || st === '进行中') return 'play';
+  if(st === '等待中' || st === '未开始') return 'wait';
+  if(st === '中断' || st === '已停止') return 'wait';
+  if(/失败/.test(st)) return 'fail';
+  return 'bad';
+}
+/* r75 列表原位交接：按稳定键复用行节点，只更新真变化的字段；移动过的行用 FLIP
+   从旧位置滑到位，新行短距入场（280/400ms + cubic-bezier(.16,1,.3,1)）。
+   以前是整表重建 —— 内容没变的行也换新节点：悬停态丢、进度微条
+   从头画、换讲时行序变化直接跳。重复键用出现序号消歧（同秒同名记录不丢）。 */
+function patchRows(ul, entries, keyOf, paint){
+  const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches;
+  const before = new Map(), pos = new Map();
+  Array.from(ul.children).forEach(li => {
+    if(li.dataset.k == null){ li.remove(); return; }   // 空态/骨架行不进交接，先清掉
+    before.set(li.dataset.k, li);
+    pos.set(li, li.getBoundingClientRect().top);
+  });
+  const used = new Set(), rows = [], seen = new Map();
+  entries.forEach((en, i) => {
+    const base = String(keyOf(en, i));
+    const occ = seen.get(base) || 0; seen.set(base, occ + 1);
+    const k = base + '#' + occ;
+    let li = before.get(k);
+    const fresh = !li;
+    if(fresh){ li = document.createElement('li'); li.dataset.k = k; }
+    used.add(li);
+    paint(li, en, i, fresh, base);
+    rows.push(li);
+  });
+  before.forEach(li => { if(!used.has(li)) li.remove(); });
+  const frag = document.createDocumentFragment();
+  rows.forEach(li => frag.appendChild(li));   // appendChild 把旧节点按新顺序搬位
+  ul.appendChild(frag);
+  if(reduce || !liAnimate()) return;
+  let fi = 0;
+  rows.forEach(li => {
+    const top0 = pos.get(li);
+    if(top0 == null){
+      li.animate([{opacity:0, translate:'0 6px'},{opacity:1, translate:'0 0'}],
+        {duration:400, delay:Math.min(fi++,5)*30, easing:'cubic-bezier(.16,1,.3,1)', fill:'backwards'});
+    } else {
+      const d = top0 - li.getBoundingClientRect().top;
+      if(Math.abs(d) > .5 && Math.abs(d) < 180)
+        li.animate([{translate:'0 ' + d + 'px'},{translate:'0 0'}],
+          {duration:280, easing:'cubic-bezier(.16,1,.3,1)'});
+    }
+  });
+}
+function liAnimate(){ return !!Element.prototype.animate; }
+
+function itemKeyOf(it, i){
+  return it.id || (it.name + '|' + (it.index == null ? i : it.index) + '|' + (it.chapter || ''));
+}
+function renderItems(j){
+  const items = j.items || [];
+  /* 识别中：放三行骨架脉冲，而不是"空插画 + 一句灰字"。
+     等待本身要有"在干活"的样子 —— 否则用户分不清是在核对还是卡住了。 */
+  if(j.state === 'scanning' || !!j.scan_proc){
+    const sk = '<li class="skelrow"><span class="sk1"></span><span class="sk2"></span><span class="sk3"></span></li>';
+    $('items').innerHTML = sk + sk + sk;
+    if($('itemsCnt')) $('itemsCnt').textContent = '';
+    lastItemsKey = null;
+    return;
+  }
+  // 后端 JSON 里的 time 每轮都变，但清单内容通常没变；没变就不动 DOM。
+  const itemsKey = items.map(it => it.name + '|' + it.status + '|' + (it.pct || 0)).join('~');
+  if(itemsKey === lastItemsKey) return;
+  lastItemsKey = itemsKey;
+  const cnt = $('itemsCnt');
+  if(!items.length){
+    $('items').innerHTML = '<li class="empty">' + ILLO.items +
+      '<span>这里还空空的。点「开始刷课」它就会一讲一讲往下走；只想看看还剩几讲，点「重新识别」。</span></li>';
+    prevStatus = {};
+    if(cnt) cnt.textContent = '';
+    return;
+  }
+  patchRows($('items'), items, itemKeyOf, (li, it, i, fresh, base) => {
+    const cls = statusCls(it.status);
+    const done = cls === 'done', play = cls === 'play';
+    const wantCls = 'item ' + cls;
+    if(li.className !== wantCls) li.className = wantCls;
+    let ic = li.querySelector('.ic'), nm = li.querySelector('.nm'), st = li.querySelector('.st');
+    if(!ic){
+      li.innerHTML = '<span class="ic"></span><span class="nm"></span><span class="st"></span>';
+      ic = li.querySelector('.ic'); nm = li.querySelector('.nm'); st = li.querySelector('.st');
+    }
+    /* 完成那一刻图标弹一次；判定按稳定键（原来按名字，重名讲会互相误触） */
+    const was = prevStatus[base];
+    ic.className = 'ic' + (done && was && was !== '已完成' ? ' pop' : '');
+    const icoKey = done ? 'done' : play ? 'run' : (cls === 'fail' ? 'fail' : (cls === 'wait' ? 'wait' : 'bad'));
+    if(ic.dataset.ico !== icoKey){ ic.dataset.ico = icoKey; ic.innerHTML = ICON[icoKey]; }
+    if(nm.textContent !== it.name) nm.textContent = it.name || '';
+    /* 状态文字真的变了才重建 st；播放中的微进度条只改 width（.6s 过渡在 CSS） */
+    const stTxt = it.status || '';
+    const txt = done ? '已完成'
+      : (it.pct ? esc(stTxt) + '<i class="micro"><b></b></i>' : esc(stTxt));
+    if(st.dataset.v !== txt){ st.dataset.v = txt; st.innerHTML = txt; }
+    const mb = st.querySelector('.micro b');
+    if(mb) mb.style.width = Math.max(0, Math.min(100, it.pct)) + '%';
+  });
+  prevStatus = {};
+  items.forEach((it, i) => { prevStatus[String(itemKeyOf(it, i))] = it.status; });
+  if(cnt) swapText(cnt, items.length ? (items.length + ' 讲') : '');
+}
+
+/* ---------- 右栏：时间轴 ---------- */
+let lastFeedKey = '', lastFeedFullKey = null;
+function renderFeed(j){
+  /* 识别中同样给骨架：这一块在核对期间本来就没有新动态，空着会以为是坏了。 */
+  if((j.state === 'scanning' || !!j.scan_proc) && !(j.feed || []).length){
+    const sk = '<li class="skelrow"><span class="sk1"></span><span class="sk2"></span><span class="sk3"></span></li>';
+    $('feed').innerHTML = sk + sk + sk;
+    if($('feedCnt')) $('feedCnt').textContent = '';
+    lastFeedFullKey = null;
+    return;
+  }
+  const feed = (j.feed || []).slice(-10).reverse();
+  const fullKey = feed.map(f => f.time + '|' + f.text + '|' + f.tone).join('~');
+  if(fullKey === lastFeedFullKey) return;
+  lastFeedFullKey = fullKey;
+  const cnt = $('feedCnt');
+  if(!feed.length){
+    $('feed').innerHTML = '<li class="empty">' + ILLO.feed +
+      '<span>还没有动态。点「开始刷课」后，这里会按时间一件件告诉你发生了什么。</span></li>';
+    lastFeedKey = '';
+    if(cnt) cnt.textContent = '0 条';
+    return;
+  }
+  const feedFirst = lastFeedKey === '';
+  const rmReduce = window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches;
+  patchRows($('feed'), feed, (f) => f.time + '|' + f.text, (li, f, i, fresh) => {
+    const tone = ['ok','warn','err','info'].indexOf(f.tone) >= 0 ? f.tone : 'info';
+    const wantCls = 'frow ' + tone;
+    if(li.className !== wantCls) li.className = wantCls;
+    let ft = li.querySelector('.ft'), fd = li.querySelector('.fd'), fx = li.querySelector('.fx');
+    if(!fx){
+      li.innerHTML = '<span class="ft num"></span><span class="fd"></span><span class="fx"></span>';
+      ft = li.querySelector('.ft'); fd = li.querySelector('.fd'); fx = li.querySelector('.fx');
+    }
+    if(ft.textContent !== String(f.time || '')) ft.textContent = f.time || '';
+    const message=LiruInterface.message(f.text);
+    const want=esc(message.detail ? message.title : message.text)+(message.detail ? '<button class="retry" type="button" data-detail="1">详细原因</button>' : '');
+    li._detail=message.detail;
+    if(fx.dataset.v !== want){ fx.dataset.v = want; fx.innerHTML = want; }
+    /* 新动态的圆点点亮一次（#145 Timeline 的语言）；首屏不弹，只弹增量 */
+    if(fresh && !feedFirst && !rmReduce && li.animate)
+      fd.animate([{transform:'scale(.3)',opacity:0},{transform:'scale(1)',opacity:1}],
+        {duration:280, easing:'cubic-bezier(.16,1,.3,1)'});
+  });
+  lastFeedKey = feed.length ? feed[0].time + feed[0].text : '';
+  if(cnt) swapText(cnt, feed.length + ' 条');
+}
+$('feed').addEventListener('click', (e) => {
+  const detail=e.target.closest('[data-detail]');
+  if(detail)return LiruInterface.showDetails(detail.closest('.frow')._detail);
+  const b = e.target.closest('[data-retry]');
+  if(b) act('/api/start', $('btnStart'), '正在重新开始…', scopeSel);
+});
+
+/* ---------- 折叠（讲次清单 / 最近动态） ----------
+   行数一多，这两块会拖得很长。标题是一颗可点的开关：点一下把清单收起来，
+   右侧计数（"N 讲 / N 条"）仍会告诉你里面有几条，不必展开就能心里有数。
+   折叠状态存 localStorage（跨刷新记住）；隐私模式读不到就回退默认展开，绝不报错。 */
+function foldPref(id){
+  try { if (typeof localStorage !== 'undefined') return localStorage.getItem(id); } catch(e){}
+  return null;
+}
+function setFoldPref(id, v){
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(id, v); } catch(e){}
+}
+function applyFold(btnId, wrapId, folded){
+  const btn = $(btnId), wrap = $(wrapId);
+  if(!btn || !wrap) return folded;
+  btn.classList.toggle('folded', folded);
+  btn.setAttribute('aria-expanded', folded ? 'false' : 'true');
+  if(folded && wrap.contains(document.activeElement))btn.focus();
+  wrap.inert=folded;wrap.setAttribute('aria-hidden',String(folded));
+  wrap.classList.toggle('folded', folded);
+  return folded;
+}
+function toggleFold(btnId, wrapId){
+  const wrap = $(wrapId);
+  const next = wrap ? !wrap.classList.contains('folded') : true;
+  applyFold(btnId, wrapId, next);
+  setFoldPref(btnId, next ? '1' : '0');
+  return next;
+}
+/* 恢复上次的折叠状态（默认展开） */
+[['foldItems','itemsWrap'], ['foldFeed','feedWrap']].forEach(([b, w]) => {
+  const bEl = $(b);
+  if(bEl) bEl.addEventListener('click', () => toggleFold(b, w));
+  applyFold(b, w, foldPref(b) === '1');
+});
+
+/* ---------- 状态迁移提示 ---------- */
+let prevState = null, lastWarnKey = '', prevItems = [], prevPage = '';
+function transitions(j){
+  if(prevState !== null && j.state !== prevState && Date.now()-simpleScanNotifiedAt>200){
+    const from = prevState;
+    prevState = j.state;
+    if(j.state === 'edge') notify('正在连接已有 Edge…', 3000);
+    else if(j.state === 'login') notify('Edge 已连接，请在 Edge 中登录', 5000);
+    else if(j.state === 'starting') notify('正在连接浏览器…', 3000);
+    else if(j.state === 'scanning') notify('正在重新识别每一讲的完成情况…', 4000);
+    else if(j.state === 'ready') notify('就绪，点「开始刷课」即可', 4000);
+    else if(j.state === 'attention') notify((j.warn && j.warn.text) || '有件事需要你处理', 7000, 'att');
+    else if(j.state === 'stopped' && from === 'scanning')
+      notify('重新识别完成，还剩几讲已经更新', 4000);
+    else if(j.state === 'stopped' && (from === 'running' || from === 'attention' || from === 'starting'))
+      notify('刷课已停止，进度已保存', 4000);
+  } else if(j.state === 'attention'){
+    const key = (j.warn && j.warn.text) || ((j.strays || []).length ? 'stray' : '');
+    if(key && key !== lastWarnKey){ lastWarnKey = key; notify(key === 'stray' ? '有个脚本还在后台运行' : key, 7000, 'att'); }
+  } else { lastWarnKey = ''; }
+  /* 登录窗口被关掉（端口还在、页面没了）：state 仍是 stopped，不盯 page 就永远没提示 */
+  if(prevPage && prevPage !== 'none' && j.page === 'none' && j.cdp_up && !j.alive)
+    notify('课堂标签已关闭或离开网站', 5000);
+  prevPage = j.page || '';
+  const cur = j.items || [];
+  if(prevItems.length){
+    for(const it of cur){
+      const was = prevItems.find(x => it.id ? x.id === it.id
+        : x.name === it.name && x.index === it.index && x.chapter === it.chapter);
+      if(it.status === '已完成' && (!was || was.status !== '已完成')){
+        if(j.planned && j.done_count === j.planned) notify('本轮 ' + j.planned + ' 讲全部完成', 8000);
+        else notify('「' + it.name + '」已完成', 5000);
+      }
+    }
+  }
+  prevItems = cur.map(x => ({id:x.id,index:x.index,chapter:x.chapter,name:x.name,status:x.status}));
+  prevState = j.state;
+}
+
+/* ---------- 顶栏 ---------- */
+function renderTop(j){
+  const map = {stopped:['','已停止'], setup:['warn','等待选讲'], ready:['ok','可以开始'], login:['warn','等待登录'],
+               edge:['warn','正在接管 Edge'], scanning:['run','正在重新识别'],
+               starting:['run','准备中'], running:['run','正在刷课'],
+               attention:['warn', (j.strays||[]).length && !j.alive ? '有残留脚本' : '需要留意']};
+  const chapterBlocked = scopeSel.mode === 'chapter' && !(j.chapters || []).some(
+    c => c.name === scopeSel.chapter && (!c.known || c.remain > 0));
+  const eff = (j.state === 'ready' && chapterBlocked) ? 'setup'
+    : ((j.state === 'setup' && (scopeSel.mode === 'all' || scopeSel.mode === 'chapter') && startReady(j))
+      ? 'ready' : j.state);
+  const m = map[eff] || ['','—'];
+  $('tbDot').className = 'sdot ' + m[0];
+  $('tbStateText').textContent = m[1];
+  $('clock').textContent = j.time || '';
+  /* 版本号挂在品牌名的悬停提示里：改版后只要把鼠标放到「刷课控制台」上就能确认
+     页面是不是新的（时钟一直在走，看不出页面加载于何时 —— 2026-09-16 排查分界线时踩过） */
+  const brand = $('tbBrand');
+  if (brand && j.ver) brand.title = '控制台版本 ' + j.ver + '（改版后刷新页面即生效）';
+}
+
+/* ---------- 渲染入口 ---------- */
+/* 「开始刷课」何时真的可用（用户实拍反馈：没点开视频页按钮也亮着，误导）：
+   - 引擎没在跑、接管 Edge 开着、没有残留脚本 —— 这三条是老条件；
+   - 默认范围（从当前讲刷 / 只刷当前章）以**当前视频页**为锚点，
+     没点开视频页时点了开始，引擎只会空等 30 分钟 → 这种情况禁用；
+   - 选了「刷某一章 / 刷完全部」时引擎自己导航，但至少要在课程页或视频页；
+     登录页、站点首页、资料页都不行。 */
+function startReady(j){
+  if(busy || simpleScan || simplePending || simpleStartWait || simpleLost || j.alive || j.scan_proc || !j.cdp_up || (j.strays || []).length) return false;
+  // 登录页/站点首页/资料页不能直接开；整门课/指定章也要先有课程页。
+  if(j.page !== 'video' && j.page !== 'course') return false;
+  if(scopeSel.mode === 'chapter'){
+    const c = (j.chapters || []).find(x => x.name === scopeSel.chapter);
+    return !!c && (!c.known || c.remain > 0);
+  }
+  if(scopeSel.mode === 'all') return true;
+  return j.page === 'video';
+}
+/* 后端能力探测：页面每次刷新都是从磁盘读的（一定最新），但**后端是常驻进程** ——
+   改了 webui.py 不重启它就一直跑旧代码，于是会出现"页面上有新按钮、后端还不认识这个接口"
+   的错位。后端在 /api/status 里报了 caps，这里**提前**判断，别等用户点了才报一句
+   "unknown action"（真人踩过，四个字根本没法排查）。 */
+function hasCap(j, c){
+  return Array.isArray(j.caps) && j.caps.indexOf(c) >= 0;
+}
+let backendOldAlerted = false;   // 后端旧版本的提醒每次页面加载只弹一遍
+
+function render(j){
+  transitions(j);
+  j=simpleView(j);
+  const scanning=j.state === 'scanning' || !!j.scan_proc;
+  const alive = !!j.alive, stray = (j.strays || []).length;
+  renderSimpleStart(j);
+  renderTop(j);
+  {
+    $('btnStart').disabled = !startReady(j);
+    /* 禁用原因写在悬停提示里：disabled 按钮不再承担"看起来能点"的误导 */
+    $('btnStart').title = $('btnStart').disabled && !alive && j.cdp_up && !stray
+      ? (j.page !== 'video' ? '先在 Edge 里点开一讲视频，再点这里；或在上方刷课范围里选某一章' : '')
+      : '';
+    $('btnStop').disabled = busy || simpleLost || !(alive || (lastStatus && lastStatus.scan_proc) || stray);
+    $('btnEdge').disabled = busy || simpleLost || alive || scanning || !!simpleStartWait || !!simplePending || !!(j.edge_connection && j.edge_connection.state === 'connecting');
+    /* 「重新识别」需要浏览器在（要附着它去读课程页）、同一时刻只能跑一个引擎，
+       而且**后端得认识这个接口** */
+    const capScan = hasCap(j, 'scan');
+    const scanPageReady = ['video', 'course', 'activity', 'unverified'].includes(j.page);
+    $('btnScan').disabled = busy || simpleLost || alive || scanning || !!stray || !!simpleStartWait || !!simplePending || !j.cdp_up || !capScan || !scanPageReady;
+    $('btnScan').classList.toggle('loading',scanning);
+    $('btnScan').setAttribute('aria-busy',scanning ? 'true' : 'false');
+    swapText($('btnScan').querySelector('.lbl'),scanning ? '正在识别…' : '重新识别');
+    $('btnScan').title = !capScan
+      ? '请重新打开控制台，再使用「重新识别」'
+      : ($('btnScan').disabled
+          ? (alive ? '正在跑脚本，等它结束再点'
+                   : (stray ? '先点「停止」清掉残留脚本'
+                            : (!j.cdp_up ? '先在 Edge 中打开课程，再点「接管 Edge」'
+                                         : '先登录并打开课程页或一讲视频，再重新识别')))
+          : '重新核对每一讲：更新章节结构，并重新判断哪几讲还没完成（只识别，不播放视频）');
+  }
+  /* 「停止」与「关闭控制台」都是会中断当前事情的动作 → 红调玻璃。
+     「停止」用 .stop，「关闭控制台」用 .quit。两个都常驻红调（不是只在悬停时红），
+     因为"这是危险动作"必须一眼可见，悬停才变色等于把提示藏起来了。 */
+  $('btnStop').classList.add('stop');
+  $('btnQuit').classList.add('quit');
+  renderScope(j);
+  LiruInterface.mountReview(j,$('reviewSummary'));
+  if(j.warn)$('reviewSummary').hidden=true;
+  /* 页面是新的、后端是旧的（改了 webui.py 没重启控制台）→ 用灵动岛提示一次，
+     并给一个一键重启的出口。只提示一次，用户要是不想立刻弄可以先忽略；
+     范围提示里还有一条常驻的说明兜底。刷新页面会重新提示（flag 随页面重置）。 */
+  if(!hasCap(j, 'scan') && !backendOldAlerted){
+    backendOldAlerted = true;
+    notify('请重新打开控制台，以使用「重新识别」', 3600000, 'att',
+           [{k:'restart', label:'重启控制台'}]);
+  }
+  renderGuide(j);
+  renderHero(j);
+  renderItems(j);
+  renderFeed(j);
+  drawIsland();
+  syncSteps();
+}
+
+let lastStatus = null, lastJson = '', pollBusy = false, pollQueued = false;
+async function poll(force){
+  if(quitting) return;
+  if(pollBusy){if(force) pollQueued=true;return;}
+  pollBusy = true;
+  try{
+    const j = await LiruPoll.fetchStatus('/api/status');
+    const recovered=simpleLost;simpleLost=false;
+    lastStatus = j;
+    updateSimpleStart(j);
+    updateSimpleScan(j);
+    /* 变更键排除 time（每秒都在变但不影响界面）：否则每 3 秒都被判"有变化"全量重绘 */
+    const s = LiruPoll.statusKey(j);
+    if(force || recovered || s !== lastJson){ lastJson = s; render(j); }
+    drawIsland();
+  }catch(e){
+    /* 控制台正在关闭（服务已退出）时连不上是**预期**的，不是故障 ——
+       以前这里会弹"连接不上控制台了，点重新连接试试"，正好在用户刚关掉控制台的
+       时候糊一脸错误提示，像是把事办坏了。 */
+    if(quitting) return;
+    if(simpleLost) return;
+    simpleLost=true;
+    if(lastStatus) render(lastStatus);
+    notify('连接不上控制台了，点「重新连接」试试', 12000, 'err', [{k:'reload', label:'重新连接'}]);
+  }finally{
+    pollBusy = false;
+    if(pollQueued && !quitting){pollQueued=false;setTimeout(()=>poll(true),0);}
+  }
+}
+
+/* 四步引导的序号写进 data-n，setStep 才能还原 */
+['st1','st2','st3','st4'].forEach((id, i) => { $(id).dataset.n = String(i + 1); });
+/* 四步进度线：只读现有 class，不重写状态机。
+   状态只在切换时变，800ms 同步一次足够；放在这里是为了不侵入原来的 setStep 逻辑。 */
+function syncSteps(){
+  const st = document.querySelector('.steps');
+  if(!st) return;
+  const all = st.querySelectorAll('.step');
+  const done = st.querySelectorAll('.step.done').length;
+  const now = st.querySelector('.step.now');
+  st.style.setProperty('--sp', (all.length ? done / all.length * 100 : 0).toFixed(1) + '%');
+  if(now) st.dataset.n = now.dataset.n || String(done + 1);
+}
+syncSteps();
+setInterval(syncSteps, 800);
+LiruPoll.createLoop(()=>poll(false),()=>LiruPoll.pollDelay(lastStatus,busy || !!simpleScan || !!simpleStartWait));
+
+/* 关标签页 = 停脚本（用户主路径）：页面卸载时发告别信标。
+   服务端有 10 秒宽限，期间轮询恢复（刷新/重开）会自动取消，所以：
+   - 关标签页/关浏览器 → 宽限走完，脚本"保存进度并退出"
+   - 刷新 F5 → 新页面 1-2 秒内恢复轮询 → 取消，刷课不受影响
+   - 最小化/切后台 → 不触发 pagehide → 照常刷
+   sendBeacon 专为"页面正在关闭还要发最后一条"设计，不会像 fetch 那样被取消。 */
+addEventListener('pagehide', (e) => {
+  if(e && e.persisted) return;     // bfcache 前进/后退，不是真正关页面
+  pageGone = true;                 // 页面真的在卸载了（关成功 / 刷新）→ 别再显示收尾页
+  if(quitting) return;             // 已经主动关过控制台，不用再发"关标签页=停脚本"的信标
+  try { navigator.sendBeacon && navigator.sendBeacon('/api/bye'); } catch (e) {}
+});
+
+/* 收尾页上的「关闭这个标签页」：用户手势里再试一次 close()
+   （有些浏览器对自己的首个标签页在用户手势下会放行；不行就什么都不发生，文案已经说明了 Ctrl+W） */
+const bct = $('btnCloseTab');
+// 浏览器拦截自动关闭时展示快捷键，不再放无效的关闭按钮。
+</script>
+</body>
+</html>
