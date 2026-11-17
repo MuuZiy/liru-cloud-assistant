@@ -234,25 +234,6 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
              0 3px 8px rgba(255,59,48,.10),
              0 16px 36px rgba(255,59,48,.16)}
 .pearl.arm:disabled{color:var(--ink-48);border-color:var(--hairline)}
-/* 顶栏图标按钮：「如何使用」的图标形态，与「关闭控制台」并排 */
-.iconbtn{position:relative;display:grid;place-items:center;width:30px;height:30px;flex:0 0 auto;
-  border-radius:var(--r-pill);color:var(--ink-48);
-  /* 三层全透明占位：层数与 hover 态对齐，过渡才是"由无到有"地长出来，而不是跳出来 */
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0),
-             0 2px 6px rgba(0,0,0,0),
-             0 8px 20px rgba(0,0,0,0)}
-/* 最小点击区：可见尺寸只有 30px，用伪元素把命中区补到 40×40（密集桌面档的下限）。
-   只扩命中区不改外观；两侧各扩 5px，与相邻的「关闭控制台」之间仍留 4px，不会互相压叠。 */
-.iconbtn::after{content:"";position:absolute;left:50%;top:50%;translate:-50% -50%;
-  width:40px;height:40px}
-.iconbtn svg{width:17px;height:17px;display:block}
-.iconbtn:hover{background:rgba(255,255,255,.86);color:var(--ink);translate:0 -1px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,1),
-             0 2px 6px rgba(0,0,0,.05),
-             0 8px 20px rgba(0,0,0,.07)}
-/* 说明正在展开：图标亮成 Action Blue，暗示"再点一次就收回" */
-.iconbtn.on{color:var(--primary)}
-
 /* ---------- 胶囊弹窗 / 灵动岛（iOS 26 风格：深色玻璃 + 弹簧动效） ----------
    定位原理（改了就会重新偏左 / 错位，务必先读完）：
    岛是 .tb-in 里**居中的那个 flex 项**，左右两侧（品牌 / 操作区）都是 flex:1 1 0，
@@ -732,28 +713,6 @@ button:active:not(:disabled){transform:scale(.96);
   font-variant-numeric:tabular-nums}   /* 里面带「识别于 23:30」 */
 .rhint:empty{display:none}
 
-/* 如何使用（默认折叠） */
-.how{border-top:1px solid rgba(0,0,0,.05);padding-top:var(--s4)}
-.how summary{font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;color:var(--primary);
-  cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}
-.how summary::-webkit-details-marker{display:none}
-/* 注意 display:inline-block 是必须的：transform 对非替换行内元素不生效，
-   缺了它这个 caret 的旋转动画其实一直是坏的 */
-.how summary::after{content:"›";font-size:17px;display:inline-block;transform-origin:center;
-  transition:transform .4s var(--spring-press),translate .26s var(--ease-hover)}
-.how summary:hover{color:#0055ad}
-.how summary:hover::after{translate:2px 0}
-.how[open] summary::after{transform:rotate(90deg)}
-/* 展开时列表淡入。用 @starting-style 而不是 animation：前者若没触发就完全无副作用，
-   后者一旦没触发、配上 fill-mode:both 会把内容永久留在 opacity:0 —— 不值得冒这个险。 */
-.how ol,.how .tiny{transition:opacity .3s var(--ease),transform .3s var(--ease)}
-@starting-style{.how ol,.how .tiny{opacity:0;transform:translateY(-4px)}}
-.how ol{margin-top:var(--s4);display:flex;flex-direction:column;gap:10px;
-  font:400 14px/1.43 var(--f-text);letter-spacing:-.224px;color:var(--ink-80)}
-.how ol li{padding-left:20px;position:relative}
-.how ol li::before{content:"·";position:absolute;left:6px;color:var(--ink-48)}
-.how .tiny{margin-top:var(--s4);font:400 12px/1.5 var(--f-text);color:var(--ink-48)}
-
 /* ---------- 右栏卡片：液态玻璃板（浅色档） ----------
    玻璃感靠四件事一起成立，缺一件就退化成白板：
    ① 半透本体（下面是环境光场，不是纯色）
@@ -1056,13 +1015,13 @@ button:active:not(:disabled){transform:scale(.96);
       - **全文件只能有这一处**。曾经同时存在过两条同名分组规则，靠前那份带着旧的
         4 通道（没有 box-shadow / translate），结果阴影和抬起是"瞬移"的 —— 悬停生硬。
         改这段之前先确认文件里只有一条。 */
-.hero,.ghostpill,.pearl,.chipbtn,.mini,.iconbtn{
+.hero,.ghostpill,.pearl,.chipbtn,.mini{
   transition-property:background-color,border-color,color,box-shadow,translate,transform;
   transition-duration:.26s,.26s,.26s,.34s,.3s,.5s;
   transition-timing-function:var(--ease-hover),var(--ease-hover),var(--ease-hover),
     var(--ease-hover),var(--ease-hover),var(--spring-press)}
 /* 菜单项 / 文字链只在原地变化，不跟着抬 —— 菜单里元素乱动会很毛躁 */
-.link,.mitem,.retry,.how summary{
+.link,.mitem,.retry{
   transition-property:background-color,color,box-shadow;
   transition-duration:.26s,.26s,.3s;
   transition-timing-function:var(--ease-hover),var(--ease-hover),var(--ease-hover)}
@@ -1094,7 +1053,6 @@ button:active:not(:disabled){transform:scale(.96);
      2560 屏 @125% 缩放 → 2048 CSS px，放大到 250% 就只剩 ~819px，正好落到 834 档） */
 @media (max-width:640px){
   .tb-time{display:none}
-  #btnHow{display:none}
   .island:not(.big){display:none}
   /* 这个断点下操作区只剩 125px，上限常数相应缩小到 2×125+2×16 */
   .island.big{max-width:calc(100% - 282px)}
@@ -1116,31 +1074,13 @@ button:active:not(:disabled){transform:scale(.96);
 .hero{position:relative;font-weight:400}
 .hero .spin{animation-duration:700ms!important}
 .hero.ok .ck path{animation-duration:250ms}
-.hero.running:disabled{
-  background:var(--acc-t);color:var(--primary);
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--primary) 18%,transparent),
-    0 3px 8px rgba(0,102,204,0),0 6px 20px rgba(0,102,204,0);
-  cursor:default;
-}
 .hero .runmark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:2px;
   opacity:0;scale:.6;transition:opacity .25s var(--ease),scale .35s var(--spring-press)}
 .runmark i{width:7px;height:7px;border-radius:var(--r-pill);background:currentColor;
   box-shadow:0 0 0 4px color-mix(in srgb,currentColor 12%,transparent)}
 .hero.running:not(.loading):not(.ok) .runmark{opacity:1;scale:1}
 .hero.running .ic{opacity:0;scale:.25}
-/* Based on Motion Prompt #079 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#079
-   The fill is driven by actual lecture progress, with the original 450ms movement slot. */
-.hero .runpct{position:absolute;right:24px;font:600 12px/1 var(--f-text);font-variant-numeric:tabular-nums;
-  color:var(--primary);opacity:0;translate:4px 0;pointer-events:none;
-  transition:opacity .25s var(--ease-hover),translate .35s var(--ease)}
-.hero .runtrack{position:absolute;left:24px;right:24px;bottom:7px;height:2px;
-  border-radius:var(--r-pill);overflow:hidden;background:var(--acc-t);opacity:0;
-  transition:opacity .25s var(--ease-hover);pointer-events:none}
-.hero .runtrack i{display:block;height:100%;width:var(--run-progress,0%);border-radius:inherit;
-  background:var(--primary);opacity:.5;transition:width 450ms var(--motion-io)}
-.hero.running .runpct,.hero.running .runtrack{opacity:1;translate:0 0}
 .hero.running .lbl{font-weight:600}
-.hero:not(.running) .runpct,.hero:not(.running) .runtrack{visibility:hidden}
 .hero.ok:not(.running):disabled{background:var(--primary);color:var(--on-primary)}
 .hero .ec{position:absolute;width:18px;height:18px;opacity:0;scale:.25;
   transition:opacity .2s var(--ease),scale .3s var(--spring-press)}
@@ -1154,20 +1094,16 @@ button:active:not(:disabled){transform:scale(.96);
 .ghostpill.loading > svg,.rescan.loading > svg{animation:spin 700ms linear infinite}
 .ghostpill.loading{background-color:var(--acc-t);color:var(--primary)}
 .chipbtn.rescan.loading{background-color:var(--acc-t);color:var(--primary);border-color:var(--primary)}
-button:focus-visible,.how summary:focus-visible{outline:2px solid var(--primary);outline-offset:4px}
+button:focus-visible{outline:2px solid var(--primary);outline-offset:4px}
 /* Motion Prompt #052 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#052 */
 .foldwrap{transition-duration:var(--motion-fold);transition-timing-function:var(--motion-io)}
 .foldwrap.folded{transition-duration:var(--motion-fold-close)}
-.how ul{margin-top:var(--s4);display:flex;flex-direction:column;gap:10px;
-  font:400 14px/1.65 var(--f-text);color:var(--ink-80);letter-spacing:-.224px}
-.how ul li{position:relative;padding-left:16px}
-.how ul li::before{content:'·';position:absolute;left:3px;color:var(--ink-48)}
 /* Motion Prompt #053 · MIT License (c) 2026 Shohei Ohtaki · https://showheyohtaki.github.io/motion-prompt/#053 */
 .menu{transform:translateY(-6px);transition:opacity var(--motion-menu-close) var(--motion-io),
   transform var(--motion-menu-close) var(--motion-io),visibility 0s var(--motion-menu-close);visibility:hidden}
 .menu.open{transform:none;visibility:visible;transition-duration:var(--motion-menu);transition-delay:0s}
 .chipbtn.open{border-color:var(--primary);color:var(--primary)}
-.item.play{background-color:var(--acc-t)}
+.item.play{background-color:var(--acc-t);border-radius:var(--r-sm)}
 .item{transition:background-color .25s var(--ease-hover)}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
@@ -1196,17 +1132,6 @@ button:focus-visible,.how summary:focus-visible{outline:2px solid var(--primary)
     <span class="tb-right">
       <span class="tb-state"><i class="sdot" id="tbDot"></i><span id="tbStateText">连接中</span></span>
       <span class="tb-time num" id="clock">--:--</span>
-      <!-- 说明入口图标化：不再和左栏的「如何使用」文字重复，点了会展开并滚到那一段 -->
-      <button class="iconbtn" id="btnHow" type="button" title="如何使用" aria-label="如何使用" aria-expanded="false" aria-controls="howBox">
-        <!-- 描边 2.1 是从 24 视框缩到 17px 渲染后 ≈1.5px，正好对上旁边 400 字重文字。
-             直接写 1.5 的话渲染出来只有 1.06px，会显得发虚。 -->
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="9"/>
-          <path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .9-1 1.6v.3"/>
-          <circle cx="12" cy="17.1" r=".95" fill="currentColor" stroke="none"/>
-        </svg>
-      </button>
       <button class="pearl" id="btnQuit" type="button" title="先停止刷课，再关闭控制台"><span class="lbl">关闭控制台</span></button>
     </span>
   </div>
@@ -1234,7 +1159,7 @@ button:focus-visible,.how summary:focus-visible{outline:2px solid var(--primary)
         </li>
         <li class="step" id="st3">
           <span class="sn">3</span>
-          <span class="stx"><b>核对进度</b><span>点「重新识别」，看清各章还剩几讲（只核对、不播放）</span></span>
+          <span class="stx"><b>核对进度（可选）</b><span>想先看清单时，点「重新识别」（只核对、不播放）</span></span>
         </li>
         <li class="step" id="st4">
           <span class="sn">4</span>
@@ -1254,8 +1179,6 @@ button:focus-visible,.how summary:focus-visible{outline:2px solid var(--primary)
             <svg class="ec" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path pathLength="1" d="M6 6l12 12M18 6L6 18"/></svg>
           </span>
           <span class="lbl">开始刷课</span>
-          <span class="runpct" aria-hidden="true"></span>
-          <span class="runtrack" aria-hidden="true"><i></i></span>
         </button>
         <div class="row">
           <button class="ghostpill" id="btnEdge" type="button">
@@ -1295,15 +1218,6 @@ button:focus-visible,.how summary:focus-visible{outline:2px solid var(--primary)
         <div class="review-summary" id="reviewSummary" hidden></div>
       </div>
 
-      <details class="how" id="howBox">
-        <summary>如何使用（点开看）</summary>
-        <ul>
-          <li>三步走完就会自动开刷，期间窗口可以最小化。</li>
-          <li>每章显示"还剩几讲"是<b>上次识别</b>的结果。你自己在平台看完一讲、或老师加了内容，
-              点「重新识别」马上刷新（只核对、不播放）。</li>
-          <li>收工：先点「停止」，再点右上角「关闭控制台」。顺序反了也别慌——重开控制台会提示你点「结束它」收拾干净。</li>
-        </ul>
-      </details>
     </section>
 
     <!-- ================= 右：看板区 ================= -->
@@ -1498,7 +1412,9 @@ function islandData(j){
     }
     if(j.page === 'login') return Object.assign({dot:'warn', cls:'warn'},
       segsOf('等待登录', '在Edge 中完成登录，点开一节视频'));
-    if(j.page === 'video') return Object.assign({dot:'ok', cls:'ok',
+    if(j.start_course_issue) return Object.assign({dot:'warn', cls:'warn'},
+      segsOf('课程清单还未就绪', j.start_course_issue));
+    if(j.page === 'video' && startReady(j)) return Object.assign({dot:'ok', cls:'ok',
         actions:[{k:'start', label:'开始刷课'}]},
       segsOf('已就绪', '视频页已打开，随时可以开始'));
     if(j.page === 'course'){
@@ -2047,34 +1963,30 @@ function renderSimpleStart(j){
   const labels={stopping:'正在停止…',scanning:'正在识别…',starting:'正在启动…',connecting:'正在连接…',
     running:'正在刷课',success:'已开始',error:'启动失败，重试',ready:'开始刷课',disabled:'开始刷课'};
   swapText(b,labels[phase]);
-  const pct=j.progress && j.progress.pct,known=pct != null && Number.isFinite(Number(pct));
-  const measured=known ? Math.max(0,Math.min(100,Number(pct))) : null;
-  b.style.setProperty('--run-progress',known ? measured+'%' : '0%');
-  b.querySelector('.runpct').textContent=known ? measured+'%' : '运行中';
 }
 function updateSimpleScan(j){
   if(!simpleScan) return;
   const a=simpleScan;
   if(j.alive || j.scan_proc || j.state === 'scanning' || j.state === 'starting') a.seen=true;
-  const ended=!j.alive && !j.scan_proc && j.state !== 'scanning' && j.state !== 'starting';
-  if(ended && j.scanned && (a.seen || (j.scan_at && j.scan_at !== a.at))){
+  const result=LiruPoll.scanResult(j,a.before,a.seen);
+  if(result==='success'){
     simpleScan=null;
     LiruFeedback.receipt($('btnScan'),'ok');
     simpleScanNotifiedAt=Date.now();
     const n=Number(j.unverified_count)||0;
     notify(n ? '识别完成，视频清单已更新；'+LiruInterface.reviewText(j) : '重新识别完成，待刷清单已更新',6000,'',n ? [{k:'review',label:'查看内容'}] : []);
-  } else if(ended && a.seen && !j.scanned){
+  } else if(result==='error'){
     simpleScan=null;
     LiruFeedback.receipt($('btnScan'),'error');
     simpleScanNotifiedAt=Date.now();
-    notify('识别没完成：'+((j.warn && j.warn.text)||'请查看登录窗口'),7000,'att');
-  } else if(Date.now()-a.started>60000){
+    notify('识别没完成：'+((j.warn && j.warn.text)||'课程清单没有更新，请确认已登录并打开课程页。'),7000,'att');
+  } else if(!a.seen && Date.now()-a.started>60000){
     simpleScan=null;
     notify('识别还没返回结果，稍后再看',6000,'att');
   }
 }
 async function act(url, btn, busyText, body){
-  if(busy || simpleLost) return;
+  if(busy || simpleLost || (btn && btn.disabled && (url === '/api/start' || url === '/api/scan'))) return;
   busy=true;
   LiruFeedback.clear(btn,true);
   if(url==='/api/start'){
@@ -2082,7 +1994,7 @@ async function act(url, btn, busyText, body){
   }
   simplePending=url === '/api/scan' ? 'scan' : url === '/api/attach-edge' ? 'edge'
     : url === '/api/start' ? 'start' : 'stop';
-  if(simplePending === 'scan') simpleScan={at:(lastStatus || {}).scan_at || '',seen:false,started:Date.now()};
+  if(simplePending === 'scan') simpleScan={before:lastStatus || {},seen:false,started:Date.now()};
   const label=btn ? btn.querySelector('.lbl') || btn : null;
   const old=label ? label.textContent || '' : '';
   if(lastStatus) render(lastStatus);
@@ -2193,33 +2105,6 @@ $('btnQuit').onclick = async () => {
     onFailed:error=>{quitting=false;$('btnQuit').disabled=false;quitReset();notify('关闭没有完成：'+error.message,7000,'err');poll(true);}
   });
 };
-$('btnHow').onclick = () => {
-  const d = $('howBox');
-  setHow(!(d._howTarget == null ? d.open : d._howTarget),true);
-};
-/* #052: Keep the details open during its exit; latest input owns the final state. */
-function setHow(open,scroll){
-  const d=$('howBox'),summary=d.querySelector('summary');
-  const start=d.getBoundingClientRect().height;
-  if(d._howAnimation)d._howAnimation.cancel();
-  d._howTarget=open;d.open=true;
-  const end=open ? d.getBoundingClientRect().height : summary.getBoundingClientRect().height+
-    parseFloat(getComputedStyle(d).paddingTop)+parseFloat(getComputedStyle(d).borderTopWidth);
-  const finish=()=>{d.open=open;d.style.overflow='';d._howAnimation=null;d._howTarget=null;};
-  if(reduceMotion() || !d.animate)finish();
-  else{
-    d.style.overflow='hidden';
-    const a=d.animate([{height:start+'px'},{height:end+'px'}],{duration:open ? 350 : 320,easing:'cubic-bezier(.65,0,.35,1)'});
-    d._howAnimation=a;a.onfinish=finish;
-  }
-  $('btnHow').classList.toggle('on',open);
-  $('btnHow').setAttribute('aria-expanded',String(open));
-  summary.setAttribute('aria-expanded',String(open));
-  if(open && scroll)d.scrollIntoView({behavior:reduceMotion() ? 'auto' : 'smooth',block:'nearest'});
-}
-$('howBox').querySelector('summary').addEventListener('click',e=>{
-  e.preventDefault();const d=$('howBox');setHow(!(d._howTarget == null ? d.open : d._howTarget),false);
-});
 /* 「重新识别」：只识别、不播放。跑完引擎会重写 课程结构.json，
    下一轮 poll 就把"还剩几讲"和范围菜单刷新成最新的。
    交给用户手动触发而不是定时自动跑 —— 识别会附着你的浏览器、也要几十秒，
@@ -2325,6 +2210,7 @@ function renderScope(j){
   if(!hasCap(j, 'scan')) hint.textContent = '请重新打开控制台，再使用「重新识别」';
   else if(j.state === 'scanning' || !!j.scan_proc) hint.textContent = '正在重新识别，范围下次开始时生效';
   else if(j.alive) hint.textContent = '正在刷课，范围下次开始时生效';
+  else if(j.start_course_issue) hint.textContent = j.start_course_issue;
   else if(!chapters.length && (j.chapters || []).length) hint.textContent = '所有章节都已经刷完了';
   else if(scopeSel.mode === 'forward') hint.textContent = '从当前讲继续，自动跳过已完成视频' + stamp;
   else if(scopeSel.mode === 'chapter') hint.textContent = '依次播放本章未完成视频' + stamp;
@@ -2384,13 +2270,14 @@ function renderGuide(j){
   setStep($('st1'), s1, !s1);
   setStep($('st2'), s2, s1 && !s2);
   setStep($('st3'), s3, scanning);
-  setStep($('st4'), busy, s1 && s2 && s3 && !busy);
+  setStep($('st4'), busy, s1 && s2 && !busy && startReady(j));
   $('leadLine').innerHTML = scanning ? '正在重新核对每一讲的完成情况，<em>稍等就好</em>。'
     : (busy ? '正在刷课，<em>窗口可以最小化</em>。'
-    : (s3 ? '进度核对好了，<em>点「开始刷课」</em>。'
-    : (s2 ? '接着点「重新识别」，<em>看清各章还剩几讲</em>。'
+    : (s2 && startReady(j) ? '课程清单已就绪，<em>可以开始刷课</em>。'
+    : (j.start_course_issue ? '先更新课程清单，再<em>选择范围并开始</em>。'
+    : (s2 ? '选好范围，或点「重新识别」<em>更新讲次清单</em>。'
     : (s1 ? 'Edge 已连接，<em>接下来在 Edge 中点开要刷的那一讲</em>。'
-    : '四步就绪，<em>剩下交给它</em>。'))));
+    : '四步就绪，<em>剩下交给它</em>。')))));
 }
 
 /* ---------- 右栏：进度面板 ---------- */
@@ -2461,7 +2348,7 @@ function renderHero(j){
     $('curLine').innerHTML = seq +
       (cur.chapter_short ? '<span class="tag">' + esc(cur.chapter_short) + '</span>' : '') + esc(cur.name);
   } else {
-    $('curLine').textContent = done ? '上一轮已完成 ' + done + ' 讲' : '还没有开始，左边点「开始刷课」就行';
+    $('curLine').textContent = done ? '上一轮已完成 ' + done + ' 讲' : '本轮还没有开始';
   }
   /* 小字行：播放中 = 本轮讲次进度；其余状态 = 占位 */
   if(runView && planned){
@@ -2555,7 +2442,7 @@ function renderItems(j){
   const cnt = $('itemsCnt');
   if(!items.length){
     $('items').innerHTML = '<li class="empty">' + ILLO.items +
-      '<span>这里还空空的。点「开始刷课」它就会一讲一讲往下走；只想看看还剩几讲，点「重新识别」。</span></li>';
+      '<span>开始或重新识别后，这里会显示讲次清单。</span></li>';
     prevStatus = {};
     if(cnt) cnt.textContent = '';
     return;
@@ -2691,7 +2578,8 @@ function transitions(j){
     else if(j.state === 'ready') notify('就绪，点「开始刷课」即可', 4000);
     else if(j.state === 'attention') notify((j.warn && j.warn.text) || '有件事需要你处理', 7000, 'att');
     else if(j.state === 'stopped' && from === 'scanning')
-      notify('重新识别完成，还剩几讲已经更新', 4000);
+      notify(j.scanned ? '重新识别完成，待刷清单已更新'
+        : ((j.warn && j.warn.text) || '课程清单没有更新，请确认已登录并打开课程页。'), 5000, j.scanned ? '' : 'att');
     else if(j.state === 'stopped' && (from === 'running' || from === 'attention' || from === 'starting'))
       notify('刷课已停止，进度已保存', 4000);
   } else if(j.state === 'attention'){
@@ -2746,7 +2634,7 @@ function renderTop(j){
    - 选了「刷某一章 / 刷完全部」时引擎自己导航，但至少要在课程页或视频页；
      登录页、站点首页、资料页都不行。 */
 function startReady(j){
-  if(busy || simpleScan || simplePending || simpleStartWait || simpleLost || j.alive || j.scan_proc || !j.cdp_up || (j.strays || []).length) return false;
+  if(!j.can_start_from_scan || busy || simpleScan || simplePending || simpleStartWait || simpleLost || j.alive || j.scan_proc || !j.cdp_up || (j.strays || []).length) return false;
   // 登录页/站点首页/资料页不能直接开；整门课/指定章也要先有课程页。
   if(j.page !== 'video' && j.page !== 'course') return false;
   if(scopeSel.mode === 'chapter'){
@@ -2776,7 +2664,7 @@ function render(j){
     $('btnStart').disabled = !startReady(j);
     /* 禁用原因写在悬停提示里：disabled 按钮不再承担"看起来能点"的误导 */
     $('btnStart').title = $('btnStart').disabled && !alive && j.cdp_up && !stray
-      ? (j.page !== 'video' ? '先在 Edge 里点开一讲视频，再点这里；或在上方刷课范围里选某一章' : '')
+      ? (j.start_course_issue || (j.page !== 'video' ? '先在 Edge 里点开一讲视频，再点这里；或在上方刷课范围里选某一章' : ''))
       : '';
     $('btnStop').disabled = busy || simpleLost || !(alive || (lastStatus && lastStatus.scan_proc) || stray);
     $('btnEdge').disabled = busy || simpleLost || alive || scanning || !!simpleStartWait || !!simplePending || !!(j.edge_connection && j.edge_connection.state === 'connecting');
@@ -2784,7 +2672,7 @@ function render(j){
        而且**后端得认识这个接口** */
     const capScan = hasCap(j, 'scan');
     const scanPageReady = ['video', 'course', 'activity', 'unverified'].includes(j.page);
-    $('btnScan').disabled = busy || simpleLost || alive || scanning || !!stray || !!simpleStartWait || !!simplePending || !j.cdp_up || !capScan || !scanPageReady;
+    $('btnScan').disabled = !!LiruPoll.readWaitText(j) || busy || simpleLost || alive || scanning || !!stray || !!simpleStartWait || !!simplePending || !j.cdp_up || !capScan || !scanPageReady;
     $('btnScan').classList.toggle('loading',scanning);
     $('btnScan').setAttribute('aria-busy',scanning ? 'true' : 'false');
     swapText($('btnScan').querySelector('.lbl'),scanning ? '正在识别…' : '重新识别');
@@ -2792,9 +2680,9 @@ function render(j){
       ? '请重新打开控制台，再使用「重新识别」'
       : ($('btnScan').disabled
           ? (alive ? '正在跑脚本，等它结束再点'
-                   : (stray ? '先点「停止」清掉残留脚本'
+                   : (LiruPoll.readWaitText(j) || (stray ? '先点「停止」清掉残留脚本'
                             : (!j.cdp_up ? '先在 Edge 中打开课程，再点「接管 Edge」'
-                                         : '先登录并打开课程页或一讲视频，再重新识别')))
+                                         : '先登录并打开课程页或一讲视频，再重新识别'))))
           : '重新核对每一讲：更新章节结构，并重新判断哪几讲还没完成（只识别，不播放视频）');
   }
   /* 「停止」与「关闭控制台」都是会中断当前事情的动作 → 红调玻璃。
@@ -2862,7 +2750,7 @@ function syncSteps(){
   const done = st.querySelectorAll('.step.done').length;
   const now = st.querySelector('.step.now');
   st.style.setProperty('--sp', (all.length ? done / all.length * 100 : 0).toFixed(1) + '%');
-  if(now) st.dataset.n = now.dataset.n || String(done + 1);
+  st.dataset.n = (now && now.dataset.n) || String(Math.min(all.length, done + 1));
 }
 syncSteps();
 setInterval(syncSteps, 800);
