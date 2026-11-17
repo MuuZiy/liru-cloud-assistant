@@ -41,7 +41,11 @@
     const raw=String(value == null ? '' : value).trim();
     let title='',text='';
     if(/课程记录.*(?:保存失败|无法保存|未能保存)/.test(raw)){
-      title='课程记录未能保存';text=(/旧记录仍保留|之前的记录仍保留/.test(raw) ? '之前的记录仍保留。' : '本次记录没有更新。')+'请先停止任务，再查看详细原因。';
+      title='课程记录未能保存';text=(/旧记录仍保留|之前的记录仍保留/.test(raw) ? '之前的记录仍保留。' : '本次记录没有更新。');
+    }else if(/未能读取课程清单|课程清单没有更新/.test(raw)){
+      title='课程清单未更新';text='在 Edge 登录并打开课程页，再回控制台点「重新识别」。成功后，打开要看的那一讲，点「开始刷课」。';
+    }else if(/平台提示同时观看多个视频/.test(raw)){
+      title='课堂提示同时播放';text='请在 Edge 查看提示，并检查其他标签页或设备是否还有课程视频在播放。';
     }else if(/验证码|验证频繁|频率限制|请求过于频繁|\b429\b|风控|安全验证/i.test(raw)){
       title='请先完成网页提示';text='请在 Edge 中查看验证或访问限制提示，处理后再继续。';
     }else if(/考勤|长按|按住确认/.test(raw) && (!/已完成|通过|成功/.test(raw) || /未通过|没.*通过|失败|未能/.test(raw))){
@@ -132,12 +136,12 @@
   }
   document.addEventListener('click',e=>{
     const el=e.target.closest && e.target.closest('button');
-    if(el && !el.closest('.menu') && !el.matches('.phfold,.fold,.iconbtn,.dlgx'))press(el,e);
+    if(el && !el.closest('.menu') && !el.matches('.phfold,.fold,.dlgx'))press(el,e);
   },true);
   let hoverFrame=0,hoverButton=null,hoverX=50;
   document.addEventListener('pointermove',e=>{
     if(media.matches)return;
-    const el=e.target.closest && e.target.closest('.pearl,.ghostpill,.chipbtn,.mini,.iconbtn');
+    const el=e.target.closest && e.target.closest('.pearl,.ghostpill,.chipbtn,.mini');
     if(!el || el.disabled)return;
     if(hoverButton!==el){hoverButton=el;el._glassRect=el.getBoundingClientRect();el.classList.add('glass-control');}
     hoverX=Math.max(0,Math.min(100,(e.clientX-el._glassRect.left)/el._glassRect.width*100));
