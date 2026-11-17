@@ -36,7 +36,7 @@ class LogState:
             return row['id'] == self.cur['id']
         return row.get('index') == self.cur.get('index') and row['name'] == self.cur['name']
 
-    def consume(self, lines):
+    def consume(self, lines, *, historical=False):
         for raw in lines:
             m = LINE_RE.match(raw)
             if not m:
@@ -151,7 +151,7 @@ class LogState:
     
             tone, sentence = humanize(ts, level, text, found)
             if tone is None:            # 操作细节不进动态, 但仍计入告警判断
-                if level in ("警告", "错误"):
+                if not historical and level in ("警告", "错误"):
                     self.warns.append({"time": hhmm(ts), "level": level, "text": text, "_ts": ts})
                 continue
             if level == "错误":
@@ -168,7 +168,7 @@ class LogState:
             if level in ("警告", "错误", "提醒"):
                 self.events.append({"time": hhmm(ts), "level": level, "text": sentence, "_ts": ts})
                 del self.events[:-8]
-                if level in ("警告", "错误"):
+                if not historical and level in ("警告", "错误"):
                     self.warns.append({"time": hhmm(ts), "level": level, "text": sentence, "_ts": ts})
     
             mm = found.get('plan')

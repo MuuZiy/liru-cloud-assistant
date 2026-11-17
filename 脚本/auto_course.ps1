@@ -36,6 +36,7 @@ param(
     [switch]$SelfTest,
     [switch]$AttachEdge,
     [switch]$ScanOnly,      # 只识别：读课程结构 + 实时核对每讲完成情况，写完 课程结构.json 就退出（不播放）
+    [string]$ScanHandoff = '',
     [string]$ConfigPath = '',
     [int]$Limit = 0,        # 只处理计划列表的前 N 讲（0 = 按配置/全部）
     [string]$Scope = 'forward',   # forward=从当前讲刷到课程末尾（默认）；current=只刷当前章（从当前讲开始+回绕）；chapter=刷完某一章；all=刷完全部章节
@@ -80,6 +81,7 @@ $script:RepeatN    = 0       # 日志限流：同一句连续重复了多少次
 $script:LastMsgAt  = $null   # 日志限流：上一句日志的写入时间
 $script:Cfg = $null           # 当前配置（供风险暂停等助手读取）
 $script:SiteRiskStop = $false          # 平台风控提示未解除时停止本轮
+$script:PlaybackHandoff = $null       # 上一讲已卸载后，本次切讲的目标与已核实提示
 
 # CDP 接收缓冲整个引擎复用：262KB 超过 85KB 的大对象堆门槛，按次新建会持续制造 GC 压力
 # （长按心跳每 220ms、播放轮询每几秒都要走一次接收）；引擎单线程，无并发风险。
@@ -201,7 +203,6 @@ function Read-Config {
         wrap_around         = $true
         limit_videos        = 0
         # 安全阀（防止无人看管时无限期卡住；配错或填 0 时用上面的内置默认值）
-        wait_video_max_minutes   = 30   # 等你打开视频页最多等多久
         wait_confirm_max_minutes = 15   # 等人工按住确认最多等多久
         stuck_minutes            = 20   # 单个视频多久没有播放进展就跳过
         scan_min_seconds         = 60   # 两次课程读取之间的最小间隔（防重复扫描）
@@ -250,7 +251,7 @@ function Save-PaceGuard {
 }
 
 function Enter-RequestGuard {
-    # 所有启动/重新识别在读取课程前统一经过这里，避免交替开始/停止导致重复扫描。
+    # 真正开始重新识别前记录读取时间，防止短时间重复请求课程。
     param($Cfg)
     $min = 60
     if ($Cfg -and [int]$Cfg.scan_min_seconds -gt 0) { $min = [int]$Cfg.scan_min_seconds }
@@ -261,7 +262,7 @@ function Enter-RequestGuard {
         try { $age = ([DateTimeOffset]::UtcNow - [DateTimeOffset]::Parse([string]$g.lastScanAt)).TotalSeconds } catch { $age = $null }
     }
     if ($null -ne $age -and $age -lt $min) {
-        throw ("课程读取间隔不足 {0} 秒（上次在 {1:N0} 秒前），本次不请求网站；请稍后再试。" -f $min, $age)
+        throw ("再次识别还需等 {0} 秒。" -f [math]::Ceiling($min - $age))
     }
     $g | Add-Member lastScanAt ([DateTimeOffset]::UtcNow.ToString('o')) -Force
     Save-PaceGuard -Guard $g
@@ -275,7 +276,32 @@ function Get-SiteRisk {
         $raw = Invoke-Js -Ws $Ws -Expression $JsSiteRiskProbe -TimeoutMs 5000
         if ([string]::IsNullOrEmpty($raw)) { return $null }
         $o = ConvertFrom-Json -InputObject $raw
-        if ($o -and -not [string]::IsNullOrWhiteSpace([string]$o.risk)) { return $o }
+        if (-not $o) { return $null }
+        $handoff = $script:PlaybackHandoff
+        if (-not $o.risk) {
+            if ($handoff) { $handoff.notice = '' }
+            return $null
+        }
+        if (-not ($handoff -and $o.handoffNotice -and $o.player -and $o.href -ceq $handoff.url)) { return $o }
+        if ($handoff.notice -ceq $o.handoffNotice -and $handoff.document -eq $o.player.document) { return $null }
+        if (-not $o.player.playing) { return $o }
+
+        # 只靠「其他视频将暂停」的文案不足以判断本讲已获准播放，核对播放器实际推进。
+        Start-Sleep -Milliseconds 400
+        if (Test-StopRequested) { return $o }
+        try {
+            $next = Invoke-Js -Ws $Ws -Expression $JsSiteRiskProbe -TimeoutMs 5000 | ConvertFrom-Json
+        } catch { return $o }
+        if (-not $next -or $next.href -cne $o.href) { return $o }
+        if (-not $next.risk) { return $null }
+        if ($next.handoffNotice -ceq $o.handoffNotice -and $next.player -and $next.player.playing -and
+            $next.player.document -eq $o.player.document -and [double]$next.player.time -gt [double]$o.player.time) {
+            $handoff.notice = $next.handoffNotice
+            $handoff.document = $next.player.document
+            Write-Log '下一讲已正常播放，继续运行' '信息'
+            return $null
+        }
+        return $next
     } catch { }
     return $null
 }
@@ -299,7 +325,7 @@ function Pause-ForSiteRisk {
         Start-Sleep -Milliseconds (Get-JitterMs -BaseMs 8000 -Percent 20)
         $again = Get-SiteRisk -Ws $Ws
         if (-not $again) {
-            Write-Log '平台提示已消失，继续播放' '成功'
+            Write-Log '平台提示已消失，继续当前任务' '成功'
             return 'ok'
         }
         $round++
@@ -672,27 +698,53 @@ $JsPauseVideo = @'
 
 $JsReleaseMedia = @'
 (async function () {
-  var count=0, failed=false, media=[];
-  function release(doc) {
+  var failed=false, media=[];
+  function collect(doc) {
     var vs=doc.querySelectorAll('video,audio');
-    for(var i=0;i<vs.length;i++) {
-      var v=vs[i]; count++; media.push(v);
-      try {
-        v.pause(); v.autoplay=false; v.removeAttribute('autoplay');
-        if(v.srcObject) v.srcObject=null;
-        v.querySelectorAll('source').forEach(function(n){n.removeAttribute('src');n.removeAttribute('srcset');});
-        v.removeAttribute('src'); v.load();
-      } catch(e) { failed=true; }
-    }
+    for(var i=0;i<vs.length;i++) media.push(vs[i]);
     var frames=doc.querySelectorAll('iframe');
     for(var f=0;f<frames.length;f++) {
       try {
         var child=frames[f].contentDocument;
-        if(child) release(child); else failed=true;
+        if(child) collect(child); else failed=true;
       } catch(e) { failed=true; }
     }
   }
-  release(document);
+  function pause(v) {
+    if (v.paused) return true;
+    return new Promise(function(resolve) {
+      function finish(ok) {
+        clearTimeout(timer);
+        v.removeEventListener('pause', afterPause);
+        resolve(ok);
+      }
+      function onPause() { finish(v.paused); }
+      var timer=setTimeout(function(){finish(false);}, 800);
+      // 等 pause 的所有处理器都走完，再从下一次任务继续。
+      function afterPause() {
+        clearTimeout(timer);
+        setTimeout(onPause, 0);
+      }
+      v.addEventListener('pause', afterPause, {once:true});
+      try { v.pause(); } catch(e) { finish(false); }
+    });
+  }
+  collect(document);
+  // 先让播放器正常分发 pause。立即 load() 会重置媒体并清掉排队的媒体事件。
+  var paused=await Promise.all(media.map(pause));
+  if (paused.some(function(ok){return !ok;}) || media.some(function(v){return !v.paused;})) {
+    return JSON.stringify({ok:false,total:media.length});
+  }
+  media.forEach(function(v){
+    try {
+      v.autoplay=false;
+      v.removeAttribute('autoplay');
+      if(v.srcObject) v.srcObject=null;
+      v.querySelectorAll('source').forEach(function(n){n.removeAttribute('src');n.removeAttribute('srcset');});
+      v.removeAttribute('src');
+      v.load();
+    } catch(e) { failed=true; }
+  });
   var released=false;
   for(var attempt=0;attempt<10;attempt++) {
     released=media.every(function(v){return v.paused && !v.srcObject && !v.hasAttribute('src') && !v.querySelector('source[src]') && v.readyState===0 && (v.networkState===0 || v.networkState===3) && v.buffered.length===0;});
@@ -700,7 +752,7 @@ $JsReleaseMedia = @'
     await new Promise(function(resolve){setTimeout(resolve,100);});
   }
   if(!released) failed=true;
-  return JSON.stringify({ok:!failed,total:count});
+  return JSON.stringify({ok:!failed,total:media.length});
 })()
 '@
 
@@ -713,27 +765,61 @@ $JsSiteRiskProbe = @'
     var r = n.getBoundingClientRect(), s = getComputedStyle(n);
     return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
   }
-  function noticeText() {
-    var out = '', ns = document.querySelectorAll('[role="alert"],[role="dialog"],.toast,.alert-danger,.layui-layer-content,.el-message,.modal.show,.moodle-dialogue');
-    for (var i = 0; i < ns.length; i++) { if (vis(ns[i])) out += ' ' + (ns[i].innerText || ns[i].textContent || ''); }
-    return out.replace(/\s+/g, ' ').slice(0, 4000);
+  function notices() {
+    var out = [], ns = document.querySelectorAll('[role="alert"],[role="dialog"],.toast,.alert-warning,.alert-danger,.layui-layer-content,.el-message,.modal.show,.moodle-dialogue');
+    for (var i = 0; i < ns.length; i++) {
+      if (vis(ns[i])) out.push((ns[i].innerText || ns[i].textContent || '').replace(/\s+/g, ' ').trim());
+    }
+    return out;
   }
+  function simultaneous(s) {
+    return /(?:禁止|不可|不能|不允许|请勿)\s*同时\s*(?:观看|播放)(?:[^。！？；\n]{0,12}视频|(?=\s*[。！!，,；;]|$))/.test(s)
+      || /(?:检测到|发现)[^。！？；\n]{0,12}同时\s*(?:观看|播放)\s*(?:多个|两个|两段)\s*视频/.test(s)
+      || /(?:请(?:先)?|须先|需要先)\s*(?:关闭|暂停|停止(?:播放)?)\s*(?:上一个|上一讲(?:的)?|其他|其它|正在播放的)\s*视频/.test(s)
+      || /视频\s*(?:禁止|不可|不能|不允许)\s*同时\s*(?:观看|播放)/.test(s);
+  }
+  var handoffPattern = /^[×✕\s]*禁止\s*同时\s*(?:观看|播放)\s*多个\s*视频\s*[，,]\s*(?:其他|其它)视频\s*【[^】]{1,200}】\s*将暂停[。！!\s×✕]*$/;
+  var handoffNotice = '', player = null;
   var risk = '', reason = '';
   var caps = document.querySelectorAll('input[name*="captcha" i],input[id*="captcha" i],iframe[src*="recaptcha"],iframe[src*="hcaptcha"],.geetest_panel,.geetest_holder,.nc-container,.g-recaptcha,.h-captcha,.cf-turnstile');
   for (var i = 0; i < caps.length; i++) { if (vis(caps[i])) { risk = 'captcha'; reason = '网站要求验证码或安全验证'; break; } }
   if (!risk && /captcha|challenge|security[-_]?check|\/verify(?:\/|\.)/i.test(href)) { risk = 'captcha'; reason = '网站要求安全验证'; }
   if (!risk) {
-    var s = noticeText();
+    var texts = notices(), s = texts.join(' ');
     if (/(?:访问|请求)(?:过于|太|过度)?频繁|访问频率.{0,8}(?:限制|超)|too many requests|rate limit/i.test(s)) { risk = 'rate'; reason = '网站限制访问频率'; }
-    else if (/(?:禁止|不可|不能).{0,8}同时.{0,6}观看|已关闭上一个视频|同时观看/i.test(s)) { risk = 'simultaneous'; reason = '平台提示同时观看多个视频'; }
     else if (/(?:请输入|请完成|需要通过).{0,12}(?:验证码|安全验证|人机验证)|verify (?:you are|that you are) human|checking your browser/i.test(s)) { risk = 'captcha'; reason = '网站要求验证或安全验证'; }
     else if (/服务(?:暂时)?不可用|系统(?:繁忙|异常)|internal server error|bad gateway|service unavailable/i.test(s)) { risk = 'server'; reason = '网站返回异常服务提示'; }
+    else if (simultaneous(s)) {
+      risk = 'simultaneous'; reason = '平台提示同时观看多个视频';
+      var handoffs = texts.filter(function(text){return handoffPattern.test(text);});
+      var others = texts.filter(function(text){return !handoffPattern.test(text);});
+      if (handoffs.length && handoffs.every(function(text){return text === handoffs[0];}) &&
+          !simultaneous(others.join(' '))) {
+        var v = document.querySelector('video'), active = 0, uncertain = false;
+        function countActive(doc) {
+          doc.querySelectorAll('video,audio').forEach(function(media){
+            if (!media.paused && !media.ended) active++;
+          });
+          doc.querySelectorAll('iframe').forEach(function(frame){
+            try {
+              if (frame.contentDocument) countActive(frame.contentDocument);
+              else uncertain = true;
+            } catch(e) { uncertain = true; }
+          });
+        }
+        countActive(document);
+        if (v && !uncertain && active === (v.paused || v.ended ? 0 : 1)) {
+          handoffNotice = handoffs[0];
+          player = {playing:!v.paused && !v.ended && !v.seeking, time:v.currentTime, document:performance.timeOrigin};
+        }
+      }
+    }
   }
   if (!risk && /\/login\/index\.php|\/login\?|\/auth\/|\/sso\//i.test(href)) {
     var pw = document.querySelector('input[type="password"]');
     if (pw && vis(pw)) { risk = 'login'; reason = '登录已失效，需要重新登录'; }
   }
-  return JSON.stringify({ risk: risk, reason: reason, href: href });
+  return JSON.stringify({ risk: risk, reason: reason, href: href, handoffNotice: handoffNotice, player: player });
 })()
 '@
 
@@ -895,7 +981,7 @@ $JsFindIndexItem = @'
 '@
 
 # 隐藏但存在的 <video> 元素数量：用来判断"页面上是不是还留着上一个播放器"。
-# 平台提示「不可同时观看多个视频」的物理原因就是同时存在多个活跃播放器。
+# 这里只统计当前文档的播放器，平台的播放会话由平台管理。
 $JsVideoCount = @'
 (function () {
   var vs = document.querySelectorAll('video');
@@ -1063,25 +1149,19 @@ $JsCourseScan = @'
   }
   var cid = courseId();
   if (!cid) { return JSON.stringify({ status: 'NOCOURSE' }); }
-  var html = null, lastCode = 0;
-  for (var attempt = 0; attempt < 3 && html === null; attempt++) {
-    var ctrl = new AbortController(), timer = setTimeout(function(){ctrl.abort();}, 12000);
-    try {
-      var resp = await fetch('/course/view.php?id=' + cid, { credentials: 'same-origin', mode: 'same-origin', signal: ctrl.signal });
-      lastCode = resp.status;
-      var final = new URL(resp.url || '/course/view.php?id=' + cid, location.origin);
-      if (final.origin !== location.origin || !/\/course\/view\.php$/.test(final.pathname) || final.searchParams.get('id') !== cid) {
-        if (resp.body) await resp.body.cancel();
-        return JSON.stringify({status:'WRONGPAGE'});
-      }
-      if (resp.ok) { html = await resp.text(); break; }
+  var html, code = 0;
+  var ctrl = new AbortController(), timer = setTimeout(function(){ctrl.abort();}, 12000);
+  try {
+    var resp = await fetch('/course/view.php?id=' + cid, { credentials: 'same-origin', mode: 'same-origin', signal: ctrl.signal });
+    code = resp.status;
+    var final = new URL(resp.url || '/course/view.php?id=' + cid, location.origin);
+    if (!resp.ok || final.origin !== location.origin || !/\/course\/view\.php$/.test(final.pathname) || final.searchParams.get('id') !== cid) {
       if (resp.body) await resp.body.cancel();
-      if (resp.status < 500 && resp.status !== 408 && resp.status !== 429) break;
-    } catch (e) { lastCode = 0; }
-    finally { clearTimeout(timer); }
-    if (attempt < 2) await new Promise(function (r) { setTimeout(r, 400 * (attempt + 1)); });
-  }
-  if (html === null) { return JSON.stringify({ status: 'HTTPERR', code: lastCode }); }
+      return JSON.stringify({status:resp.ok ? 'WRONGPAGE' : 'HTTPERR', code:code});
+    }
+    html = await resp.text();
+  } catch (e) { return JSON.stringify({status:'HTTPERR', code:code}); }
+  finally { clearTimeout(timer); }
   var doc = new DOMParser().parseFromString(html, 'text/html');
   if (doc.querySelector('form#login, form[action*="/login/index.php"]')) return JSON.stringify({status:'LOGIN'});
   var bodyCourse = ((doc.body && doc.body.className || '').match(/(?:^|\s)course-(\d+)(?:\s|$)/) || [])[1];
@@ -1265,9 +1345,8 @@ function Test-StopRequested {
 }
 
 function Stop-PageVideo {
-    # 先 pause，再清除 video/audio 的 src、子 source 与 srcObject；
-    # 旧实现只清 video.src 会重新加载子 source 的旧流，导致平台判定同时观看。
-    param($Ws)
+    # 等正常暂停事件，再清除 video/audio 的 src、子 source 与 srcObject。
+    param($Ws, [ref]$MediaCount)
     $raw = Invoke-Js -Ws $Ws -Expression $JsReleaseMedia -TimeoutMs 6000
     $facts = $null
     try { $facts = ConvertFrom-Json -InputObject $raw } catch { }
@@ -1278,12 +1357,14 @@ function Stop-PageVideo {
         try { $facts = ConvertFrom-Json -InputObject $raw } catch { }
     }
     if (-not $facts -or -not $facts.ok) { return $false }
+    if ($MediaCount) { $MediaCount.Value = [int]$facts.total }
     return $true
 }
 
 function Navigate-ToVideo {
     # 单一标签页只导航一次；不再点击索引后补发导航，避免 target=_blank 和双重加载。
     param($Ws, [string]$Id, [string]$Url, [string]$ReadyJs = $JsLoaded, [int]$TimeoutSec = 90)
+    $script:PlaybackHandoff = $null
     if (Test-StopRequested) { return $false }
     $ready = Get-ReadyJsForId -Id $Id
     $here = Invoke-Js -Ws $Ws -Expression $JsHref
@@ -1293,7 +1374,8 @@ function Navigate-ToVideo {
         $samePage = ($from.GetLeftPart([UriPartial]::Authority) -eq $to.GetLeftPart([UriPartial]::Authority) -and $from.AbsolutePath -eq $to.AbsolutePath)
     } catch { }
     if ($samePage -and (Invoke-Js -Ws $Ws -Expression $ready) -eq $true) { return $true }
-    if (-not (Stop-PageVideo -Ws $Ws)) {
+    $mediaCount = 0
+    if (-not (Stop-PageVideo -Ws $Ws -MediaCount ([ref]$mediaCount))) {
         Write-Log '上一讲媒体未能确认停止，跳过本讲以避免平台判定同时观看' '警告'
         return $false
     }
@@ -1301,6 +1383,11 @@ function Navigate-ToVideo {
     if (Test-StopRequested) { return $false }
     Write-Log ("上一讲媒体已停止，在当前标签页切换到活动 {0}" -f $Id) '信息'
     $null = Send-CdpCommand -Ws $Ws -Method 'Page.navigate' -Params @{ url = $Url }
+    if ($mediaCount -gt 0 -and $from -and $to -and
+        $from.GetLeftPart([UriPartial]::Authority) -eq $to.GetLeftPart([UriPartial]::Authority) -and
+        $from.AbsolutePath -match '^/mod/[^/]+/view\.php$' -and $from.Query -notmatch "(?:^\?|&)id=$Id(?:&|$)") {
+        $script:PlaybackHandoff = @{url=$Url; notice=''; document=$null}
+    }
     return (Wait-PageReady -Ws $Ws -Url $Url -ReadyJs $ready -TimeoutSec $TimeoutSec)
 }
 
@@ -1375,46 +1462,6 @@ function Test-CdpAlive {
     } catch { return $false }
 }
 
-function Wait-ForVideoPage {
-    # 等你把视频页面打开；识别到就自动继续
-    # 安全阀：等太久（默认 30 分钟）或连接断了就退出，避免无人看管时永远挂在这里
-    param($Ws, [int]$PollSeconds = 3, [int]$MaxMinutes = 30)
-    $round = 0
-    $fail = 0
-    $deadline = (Get-Date).AddMinutes($MaxMinutes)
-    while ($true) {
-        if (Test-StopRequested) { return $false }
-        if ((Get-Date) -ge $deadline) {
-            Write-Log ("等你在浏览器里打开视频页已超过 {0} 分钟，脚本先退出。想继续请重新点「开始刷课」" -f $MaxMinutes) '警告'
-            return $false
-        }
-        $href = $null
-        try {
-            # 短超时：连接断了要能很快发现，而不是每次白等默认的 30 秒
-            $href = Invoke-Js -Ws $Ws -Expression $JsHref -TimeoutMs 5000
-            $fail = 0
-        } catch {
-            $fail++
-            if ($fail -ge 10) {
-                Write-Log '浏览器连接已断开，无法继续等待视频页，脚本停止' '错误'
-                return $false
-            }
-        }
-        # 课程页/章节页也算“进入课程上下文”：扫描本身会自己取课程 id，
-        # 不必逼用户必须先点开某一讲。视频是否存在留给播放阶段判断。
-        if ($href -and $href -match '(?:/mod/[^/]+/view\.php|/course/(?:view|section)\.php)') {
-            $ready = $null
-            try { $ready = Invoke-Js -Ws $Ws -Expression $JsLoaded -TimeoutMs 5000 } catch { }
-            if ($ready -eq $true) { return $true }
-        }
-        $round++
-        if (($round % 10) -eq 1) {
-            Write-Log '请在这个 Edge 窗口里打开你要看的那一讲视频页面（脚本会自动识别并开始，无需其它操作）' '提醒'
-        }
-        Start-Sleep -Seconds $PollSeconds
-    }
-}
-
 function Start-Playback {
     param($Ws)
     Start-Sleep -Milliseconds (Get-JitterMs -BaseMs 900 -Percent 50)
@@ -1466,6 +1513,8 @@ function Get-CourseStructure {
         $pr = Pause-ForSiteRisk -Ws $Ws -Risk $risk -Cfg $script:Cfg
         if ($pr -ne 'ok') { return $null }
     }
+    if (Test-StopRequested) { return $null }
+    Enter-RequestGuard -Cfg $script:Cfg
 
     # 后台标签页会被 Chromium 冻结/降频，fetch 可能卡几十秒甚至不返回。
     # 用 CDP 的焦点模拟临时解除限制；结束后**必须关掉**，否则长按确认那边
@@ -1490,6 +1539,9 @@ function Get-CourseStructure {
         try { $data = ConvertFrom-Json -InputObject $raw } catch { }
         if (-not $data) { return $null }
         if ($data.status -ne 'OK') {
+            if ($data.status -eq 'HTTPERR' -and $data.code -in @(403, 429)) {
+                throw ("平台限制了本次读取（HTTP {0}）。请在 Edge 查看平台提示，恢复后再点「重新识别」。" -f $data.code)
+            }
             $why = [string]$data.status
             if ($why -eq 'NOCOURSE') { $why = '当前页面不属于任何课程' }
             Write-Log ("读取课程结构失败（{0}）：请确认已登录，并停在课程页或任意一讲页面" -f $why) '警告'
@@ -1601,15 +1653,52 @@ function Invoke-ActivityProbe {
     return $map
 }
 
+function Get-ScanDocumentKey {
+    # 指纹只识别本次打开的文档。持久文件中不额外保存页面地址。
+    param($Ws)
+    try {
+        $identity = Invoke-Js -Ws $Ws -TimeoutMs 3000 -Expression "(Number.isFinite(performance.timeOrigin) ? location.href.split('#')[0] + ' ' + performance.timeOrigin : '')"
+        if (-not $identity) { return '' }
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { return [Convert]::ToBase64String($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$identity))) }
+        finally { $sha.Dispose() }
+    } catch { return '' }
+}
+
+function Read-IdentifiedCourse {
+    param([string]$Href)
+    $path = Join-Path $ScriptDir '课程结构.json'
+    try {
+        $data = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    } catch { $data = $null }
+    if (-not $data.identified -or -not $data.sections -or $data.classificationVersion -ne 1 -or $data.source -ne 'scan') {
+        throw '还没有课程清单。请先到控制台点「重新识别」，等清单更新后再开始。'
+    }
+    $url = [Uri]$Href
+    $id = [regex]::Match($url.Query, '(?:^\?|&)id=(\d+)(?:&|$)').Groups[1].Value
+    if ($id -and $url.GetLeftPart([UriPartial]::Authority) -ceq $data.origin) {
+        if ($url.AbsolutePath -match '/course/view\.php$' -and $id -eq [string]$data.courseid) { return $data }
+        if ($url.AbsolutePath -match '/course/section\.php$' -and $id -in @($data.sections.id)) { return $data }
+        if ($url.AbsolutePath -match '/mod/([a-z][a-z0-9_]*)/view\.php$') {
+            $mod = $Matches[1]
+            foreach ($item in $data.sections.items) {
+                if ($id -eq [string]$item.id -and $mod -eq (Get-ActivityMod -Item $item) -and $item.video -eq $true) { return $data }
+            }
+        }
+    }
+    throw '当前页面和课程清单不一致。请回到已识别的课程，或点「重新识别」更新清单。'
+}
+
 function Write-CourseStructureFile {
     # 把章节结构写成 课程结构.json（UTF-8 BOM）。
     # video / kind / kindBy 是**引擎的最终结论**；控制台只读这些字段，不再自己判。
-    param($Data)
+    param($Data, [string]$HandoffToken = '', [string]$DocumentKey = '')
     try {
         $out = [ordered]@{
             updated  = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
             source   = [string]$Data.source
             classificationVersion = 1
+            identified = [bool]$Data.identified
             courseid = [string]$Data.courseid
             origin   = [string]$Data.origin
             current  = [string]$Data.current
@@ -1635,6 +1724,10 @@ function Write-CourseStructureFile {
             }
             $out.sections.Add([ordered]@{ id = [string]$s.id; name = [string]$s.name; url = [string]$s.url; items = $items.ToArray() })
         }
+        if ($HandoffToken -and $DocumentKey) {
+            $out['scan_handoff'] = $HandoffToken
+            $out['scan_document'] = $DocumentKey
+        }
         $json = $out | ConvertTo-Json -Depth 6
         # 原子替换：控制台每 3 秒轮询，直接 WriteAllText 会读到半个 JSON。
         $target = Join-Path $ScriptDir '课程结构.json'
@@ -1642,12 +1735,14 @@ function Write-CourseStructureFile {
         [System.IO.File]::WriteAllText($tmp, $json,
             (New-Object System.Text.UTF8Encoding($true)))
         if ([System.IO.File]::Exists($target)) {
-            [System.IO.File]::Replace($tmp, $target, $null)
+            [System.IO.File]::Replace($tmp, $target, [NullString]::Value)
         } else {
             [System.IO.File]::Move($tmp, $target)
         }
+        return $true
     } catch {
         Write-Log ("保存课程结构失败，已保留原文件：{0}" -f $_.Exception.Message) '警告'
+        return $false
     } finally {
         try { if (Test-Path -LiteralPath ($target + '.tmp')) { Remove-Item -LiteralPath ($target + '.tmp') -Force } } catch { }
     }
@@ -1747,7 +1842,7 @@ function Get-PendingVideos {
     # 完成状态优先用**本次刚抓的课程页**（平台自己的完成标记，最权威）；
     # 只有读不到状态的少数活动才实时核对（串行 fetch），最后才逐页打开兜底。
     # 返回 @{ pending = @(...); results = @{ id = $true/$false } }；被停止时返回 $null。
-    param($Ws, [array]$Videos)
+    param($Ws, [array]$Videos, [switch]$SkipUnknownProbe)
 
     $results = @{}
     $need = @()
@@ -1761,7 +1856,7 @@ function Get-PendingVideos {
         }
     }
 
-    if ($need.Count -gt 0) {
+    if ($need.Count -gt 0 -and -not $SkipUnknownProbe) {
         Write-Log ("有 {0} 讲读不到平台完成状态，正在实时核对…" -f $need.Count) '信息'
         $probe = $null
         $pStart = Get-Date
@@ -1820,7 +1915,6 @@ function Get-Playlist {
     param($Ws, $Cfg, [string]$Scope = 'forward', [string]$Chapter = '')
 
     $data = $script:CourseStruct
-    if (-not $data -or -not $data.sections) { $data = Get-CourseStructure -Ws $Ws }
     if (-not $data -or -not $data.sections) { return @() }
 
     $curId = ''
@@ -2153,8 +2247,7 @@ function Invoke-WatchVideo {
         if ($pr -ne 'ok') { $script:SiteRiskStop = $true; $result.状态 = '风控停止'; $result.备注 = '平台提示未解除'; return $result }
     }
 
-    # 导航：优先真实点击课程索引（平台自己的链接，会话状态切换才正确）；
-    # 无论走哪条路都先停掉上一讲的视频 → 避免平台报「不可同时观看多个视频」。
+    # 切讲前先停掉上一讲的媒体，再在当前标签页导航。
     # 有些活动（论坛/实验/资源）页面里根本没有视频，所以就绪条件只等"页面加载完"，
     # 而不是"必须有 video"（后者会让这类活动白等 90 秒）。
     if (-not (Navigate-ToVideo -Ws $Ws -Id ([string]$Video.id) -Url $url -ReadyJs $JsLoaded)) {
@@ -2616,7 +2709,10 @@ function Invoke-Main {
     Write-Log '脚本启动' '信息'
     # 这行是给控制台认的：它据此把界面切成"正在重新识别"，
     # 而不是误报成"正在刷课"（识别会附着浏览器、也会跑几十秒）。
-    if ($ScanOnly) { Write-Log '重新识别模式：只核对每一讲的完成情况，不播放视频' '信息' }
+    if ($ScanOnly) {
+        $Scope = 'all'
+        Write-Log '重新识别模式：只核对每一讲的完成情况，不播放视频' '信息'
+    }
 
     $psv = $PSVersionTable.PSVersion
     Write-Log ("PowerShell 版本：{0}" -f $psv.ToString()) '信息'
@@ -2625,8 +2721,6 @@ function Invoke-Main {
     $cfg = Read-Config -Path $ConfigPath
     $script:Cfg = $cfg
     $port = [int]$cfg.debug_port
-    $videoWaitMin = 30                                  # 等你打开视频页的最长时间
-    if ([int]$cfg.wait_video_max_minutes -gt 0) { $videoWaitMin = [int]$cfg.wait_video_max_minutes }
 
     if ($AttachEdge) {
         Invoke-AttachEdge -Cfg $cfg
@@ -2644,86 +2738,61 @@ function Invoke-Main {
     $null = Send-CdpCommand -Ws $ws -Method 'Page.enable'
     $null = Send-CdpCommand -Ws $ws -Method 'Runtime.enable'
 
-    # 先确认浏览器停在一个能读到课程的地方（课程页或任意一讲），再抓结构。
-    # 旧版顺序反了：先抓结构（失败/抓到别的课）再等页面，等于白跑一次。
-    $href = $null
-    try { $href = Invoke-Js -Ws $ws -Expression $JsHref } catch { }
-    if (-not ($href -and ($href -match '/mod/[^/]+/view\.php' -or $href -match 'course/(?:view|section)\.php'))) {
-        Write-Log '当前标签页不是课程页面，等待你在 Edge 中打开' '提醒'
-        if (-not (Wait-ForVideoPage -Ws $ws -MaxMinutes $videoWaitMin)) {
-            Write-Log '等待被中断' '提醒'
-            return
-        }
+    $href = Invoke-Js -Ws $ws -Expression $JsHref -TimeoutMs 5000
+    if (-not ($href -and $href -match '(?:/mod/[^/]+/view\.php|/course/(?:view|section)\.php)(?:[?#]|$)')) {
+        throw '请在 Edge 中打开课程页或一讲视频，再回到控制台操作。'
     }
-    try { $href = Invoke-Js -Ws $ws -Expression $JsHref } catch { }
     Write-Log ("已识别到课程页面：{0}" -f $href) '成功'
 
-    # 统一读取间隔：普通开始和重新识别共用，避免交替开始/停止造成重复扫描。
-    try { Enter-RequestGuard -Cfg $cfg } catch { Write-Log '课程读取间隔检查失败，本次不请求网站' '警告'; throw }
-
-    # 采集整门课的章节结构（一次 GET 课程页），写 课程结构.json 供控制台选章。
-    # 这一步同时完成"哪些活动是视频"的分类（见 识别规则.ps1）。
-    try {
+    $useScannedProgress = $false
+    $scanDocument = ''
+    if ($ScanOnly) {
+        if ($ScanHandoff) { $scanDocument = Get-ScanDocumentKey -Ws $ws }
         $script:CourseStruct = Get-CourseStructure -Ws $ws
-        if ($script:CourseStruct) { Write-CourseStructureFile -Data $script:CourseStruct }
-    } catch {
-        Write-Log ("采集课程结构时出错：{0}" -f $_.Exception.Message) '警告'
-    }
-    # CDP 超时会把共享 socket abort 掉；不重连的话，紧接着的 Get-Playlist 会继续用死连接，
-    # 最后误报“没有识别到视频”。这里只重试一次，避免无限循环。
-    if (-not $script:CourseStruct) {
-        Write-Log '课程结构没读到，正在重连浏览器后重试一次…' '警告'
-        $re = $null
-        try { $re = Connect-Cdp -Port ([int]$cfg.debug_port) } catch { }
-        if ($re) {
-            $ws = $re
-            $script:Ws = $re
-            try {
-                $script:CourseStruct = Get-CourseStructure -Ws $ws
-                if ($script:CourseStruct) { Write-CourseStructureFile -Data $script:CourseStruct }
-            } catch { }
+        if (-not $script:CourseStruct) { throw '未能读取课程清单。请确认 Edge 中已登录、课程页能正常打开，再点「重新识别」。' }
+    } else {
+        if (Get-SiteRisk -Ws $ws) { throw '课堂页面出现异常提示，请在 Edge 中处理后再开始。' }
+        $script:CourseStruct = Read-IdentifiedCourse -Href $href
+        if ($ScanHandoff -and $script:CourseStruct.scan_handoff -ceq $ScanHandoff -and $script:CourseStruct.scan_document) {
+            $file = Join-Path $ScriptDir '课程结构.json'
+            $age = ([DateTime]::UtcNow - [IO.File]::GetLastWriteTimeUtc($file)).TotalSeconds
+            $useScannedProgress = $age -ge 0 -and $age -lt 120 -and
+                $script:CourseStruct.scan_document -ceq (Get-ScanDocumentKey -Ws $ws)
         }
     }
 
-    # 读取播放列表（分类已在 Get-CourseStructure 里完成，这里只做筛选和排序）
-    $videos = Get-Playlist -Ws $ws -Cfg $cfg -Scope $Scope -Chapter $Chapter
-    if (-not $videos -or $videos.Count -eq 0) {
-        throw '没有识别到要刷的视频：请确认已登录、并停在课程页或任意一讲页面'
-    }
-
+    $videos = @(Get-Playlist -Ws $ws -Cfg $cfg -Scope $Scope -Chapter $Chapter)
     $script:ScanResults = @{}
-    if (-not $DryRun) {
-        # 完成状态直接用刚抓的课程页（平台自己的标记），读不到的才实时核对
+    if ($ScanOnly) {
         $scan = Get-PendingVideos -Ws $ws -Videos $videos
-        if ($null -eq $scan) {
+        if ($null -eq $scan -or (Test-StopRequested)) {
             Write-Log '识别过程被停止' '提醒'
             return
         }
-        $script:ScanResults = $scan.results
-        $videos = @($scan.pending)
-        # 把识别结果写回章节结构，控制台据此显示每章"还剩几讲"
-        if ($script:CourseStruct -and $script:ScanResults.Count -gt 0) {
-            try {
-                $script:CourseStruct = Set-StructDone -Struct $script:CourseStruct -Results $script:ScanResults
-                Write-CourseStructureFile -Data $script:CourseStruct
-            } catch { }
+        $script:CourseStruct = Set-StructDone -Struct $script:CourseStruct -Results $scan.results
+        $script:CourseStruct | Add-Member -NotePropertyName identified -NotePropertyValue $true -Force
+        $sameDocument = $scanDocument -and $scanDocument -ceq (Get-ScanDocumentKey -Ws $ws)
+        $saved = if ($sameDocument) {
+            Write-CourseStructureFile -Data $script:CourseStruct -HandoffToken $ScanHandoff -DocumentKey $scanDocument
+        } else {
+            Write-CourseStructureFile -Data $script:CourseStruct
         }
-        if ($videos.Count -eq 0) {
-            if ($ScanOnly) {
-                Write-Log '重新识别完成：核对到 0 讲还没完成（只识别，不播放）' '成功'
-            } else {
-                Write-Log '识别结果：这门课的讲都已经完成了，本轮没有需要播放的内容' '成功'
-            }
-            return
-        }
-        Write-Log ("识别完成：本轮需要播放 {0} 讲" -f $videos.Count) '成功'
+        if (-not $saved) { return }
+        Write-Log ("重新识别完成：核对到 {0} 讲还没完成（只识别，不播放）" -f $scan.pending.Count) '成功'
+        return
     }
 
-    # 只识别在这一步就结束：此时 课程结构.json 已包含完整核对结果。
-    # 必须放在 -Limit 之前，否则 -ScanOnly -Limit N 会把“还没完成几讲”报小。
-    if ($ScanOnly) {
-        Write-Log ("重新识别完成：核对到 {0} 讲还没完成（只识别，不播放）" -f $videos.Count) '成功'
-        return
+    if ($videos.Count -eq 0) {
+        throw '当前范围没有可播放的视频。请改一下刷课范围，或点「重新识别」更新清单。'
+    }
+    if ($useScannedProgress -and -not $DryRun) {
+        $scan = Get-PendingVideos -Ws $ws -Videos $videos -SkipUnknownProbe
+        $script:ScanResults = $scan.results
+        $videos = @($scan.pending)
+        if ($videos.Count -eq 0) {
+            Write-Log '识别结果：这门课的讲都已经完成了，本轮没有需要播放的内容' '成功'
+            return
+        }
     }
 
     # auto_next=false：只处理本轮列表的第一讲（给“我只要刷这一讲”的场景）
@@ -2803,12 +2872,12 @@ function Invoke-Main {
 
     # 把本轮的最终结果也写回章节结构：控制台显示的"还剩几讲"用的就是这份实时数据
     try {
-        if ($script:CourseStruct -and $script:ScanResults -and $script:ScanResults.Count -gt 0) {
+        if ($script:CourseStruct -and $results.Count -gt 0) {
             foreach ($r in $results) {
                 if ([string]$r.状态 -like '已完成*') { $script:ScanResults[[string]$r.活动] = $true }
             }
             $script:CourseStruct = Set-StructDone -Struct $script:CourseStruct -Results $script:ScanResults
-            Write-CourseStructureFile -Data $script:CourseStruct
+            $null = Write-CourseStructureFile -Data $script:CourseStruct
         }
     } catch { }
     Write-Log '脚本结束' '信息'

@@ -15,6 +15,8 @@ from webui_core import lecture_no
 from webui_log_reader import IncrementalLogReader
 import ctypes
 import json
+import math
+from datetime import datetime
 import os
 import re
 import subprocess
@@ -23,11 +25,13 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PS1 = os.path.join(HERE, "auto_course.ps1")
 CONF = os.path.join(HERE, "配置.json")
+PACE_FILE = os.path.join(HERE, "请求节奏.json")
 LOGFILE = os.path.join(HERE, "运行日志.txt")
 PIDFILE = os.path.join(HERE, "run.pid")
 STOPFLAG = os.path.join(HERE, "stop.flag")
@@ -43,7 +47,7 @@ ES_DISPLAY_REQUIRED = 0x00000002
 HOST, PORT = "127.0.0.1", 8765
 DEFAULT_DEBUG_PORT = 9232  # 本机兼容层；已有 Edge 的实际端口从 DevToolsActivePort 读取
 # 代码版本标记（随改动递增）：用于确认 8765 上跑的到底是哪一版代码
-BUILD_TAG = "2026-11-16-r80"
+BUILD_TAG = "2026-11-17-r88"
 # 后端能力清单，随 /api/status 一起下发。前端据此判断"我要用的这个接口在不在"。
 # 为什么需要它：**页面是每次 GET / 从磁盘读的，刷新一下就是最新的；后端却是常驻进程**，
 # 改了 webui.py 不重启它就一直跑旧代码。于是会出现"页面上有新按钮、后端还不认识这个接口"
@@ -413,6 +417,7 @@ def engine_processes(max_age=5.0, force=False):
 
 _active_scan = {"pid": 0, "proc": None}
 _scan_lock = threading.RLock()
+_scan_handoff = {}
 _owned_engines = {}                 # Popen 句柄保护所有本控制台启动的引擎，不只扫描
 
 
@@ -608,6 +613,73 @@ def config():
         return {}
 
 
+def course_read_wait():
+    """只读同一个节奏记录；控制台提早提示，引擎仍做最终检查。"""
+    try:
+        limit = round(float(config().get("scan_min_seconds") or 60))
+        if not 0 < limit <= 2_147_483_647:
+            limit = 60
+    except (TypeError, ValueError, OverflowError, AttributeError):
+        limit = 60
+    try:
+        with open(PACE_FILE, encoding="utf-8-sig") as f:
+            stamp = json.load(f).get("lastScanAt")
+        last = datetime.fromisoformat(stamp).timestamp()
+    except (OSError, TypeError, ValueError, OverflowError, AttributeError):
+        return 0
+    return max(0, math.ceil(limit - (time.time() - last)))
+
+
+def read_wait_message(seconds):
+    return f"再次识别还需等 {seconds} 秒。"
+
+
+def scan_page_key(page):
+    if page.get("classroom_tabs") == 1 and page.get("target_id") and page.get("url"):
+        return page["target_id"], urllib.parse.urldefrag(page["url"]).url
+    return None
+
+
+def start_course_issue(page):
+    """确认已手动识别，且当前页面属于保存的课程。"""
+    if page.get("classroom_tabs", 0) > 1:
+        return "检测到多个课堂标签。请只保留要使用的课堂标签。"
+    course_sections()
+    with _course_lock:
+        if not _course.get("identified"):
+            return "还没有课程清单。请先点「重新识别」，等清单更新后再开始。"
+        course_id, origin, sections = _course["courseid"], _course["origin"], _course["val"]
+    parsed = urllib.parse.urlsplit(page.get("url") or "")
+    current_origin = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    ids = urllib.parse.parse_qs(parsed.query).get("id", [])
+    if current_origin == origin and len(ids) == 1 and ids[0].isdigit():
+        item_id = ids[0]
+        if parsed.path.endswith("/course/view.php") and item_id == course_id:
+            return ""
+        if parsed.path.endswith("/course/section.php") and any(s.get("id") == item_id for s in sections):
+            return ""
+        activity = page.get("activity") or _activity_ref(page.get("url") or "")
+        if activity and any(it.get("id") == item_id and it.get("type") == activity["mod"] and it.get("video") is True
+                            for s in sections for it in s.get("items", [])):
+            return ""
+    return "当前页面和课程清单不一致。请回到已识别的课程，或点「重新识别」更新清单。"
+
+
+def scan_handoff_for(page):
+    """仅本控制台启动并成功保存的识别，可以直接交给下一次开始操作。"""
+    key = scan_page_key(page)
+    with _scan_lock:
+        if key is None or key != _scan_handoff.get("page"):
+            return ""
+        token = _scan_handoff["token"]
+    course_sections()  # 刷新同一个原子快照的识别标记和写入时间
+    with _course_lock:
+        age = time.time() - _course.get("handoff_saved_at", 0)
+        if _course.get("handoff_token") == token and 0 <= age < 120:
+            return token
+    return ""
+
+
 def debug_port():
     try:
         return int(config().get("edge_attach_port") or DEFAULT_DEBUG_PORT)
@@ -792,6 +864,7 @@ def cdp_page_info(max_age=0.5, timeout=0.6):
                 detail = {"state": state,
                           "title": (page.get("title") or "").strip(),
                           "url": page.get("url") or "",
+                          "target_id": page.get("id") or "",
                           "activity": act,
                           "known": known if isinstance(known, dict) else None,
                           "classroom_tabs": len(moodle)}
@@ -896,14 +969,18 @@ def start_run(limit=0, mode='forward', chapter=''):
         return False, "当前浏览器标签页不是视频页，请先在课堂标签中点开一讲视频，再开始"
     if mode in ("all", "chapter") and pstate not in ("video", "course"):
         return False, "先打开课程页或一讲视频，再开始"
-    # 注意：这里**故意不拿 课程结构.json 当门槛**（2026-09-16 修）。
-    # 那份 json 是引擎上一次运行时写的"快照"，只用于控制台显示；它可能过期、
-    # 也可能是旧版引擎写的（比如缺 video 字段）。而引擎开刷时**会自己实时重读**
-    # 整门课的结构 —— 让一份过期的快照挡住"开始刷课"，就是把显示层的东西
-    # 当成了决策依据（用户报的"第三周剩 1 讲"就是同一类问题）。
+    issue = start_course_issue(pinfo)
+    if issue:
+        return False, issue
+    handoff = scan_handoff_for(pinfo)
     housekeeping_async()          # 后台做日志轮转
     drop_stop_flag()
-    proc = spawn_ps(limit=limit, scope=mode, chapter=chapter)
+    if handoff:
+        proc = spawn_ps(["-ScanHandoff", handoff], limit=limit, scope=mode, chapter=chapter)
+        with _scan_lock:
+            _scan_handoff.clear()
+    else:
+        proc = spawn_ps(limit=limit, scope=mode, chapter=chapter)
     for _ in range(80):           # 最多 8 秒；不再先无条件等待半秒
         if engine_alive():
             # 这里不能再清 stop.flag：用户可能在启动的 8 秒窗口里刚点了停止，
@@ -942,6 +1019,9 @@ def start_scan():
         return False, "正在确认并自动清理残留脚本，请稍等；也可手动点「停止」"
     if not os.path.exists(PS1):
         return False, "找不到 auto_course.ps1"
+    wait = course_read_wait()
+    if wait:
+        return False, read_wait_message(wait)
     if not cdp_up():
         return False, "尚未接管 Edge，请先点「接管 Edge」并在浏览器标签页中打开课程"
     pinfo = cdp_page_info(max_age=0)
@@ -951,7 +1031,13 @@ def start_scan():
     # 识别必须覆盖整门课：-ScanOnly 默认 scope=current，会把“待刷”限制在当前章，
     # 课程页甚至没有当前讲可用。这里显式 all，课程页/其它章也能正确核对。
     with _scan_lock:
-        proc = spawn_ps(["-ScanOnly"], scope="all")
+        page_key = scan_page_key(pinfo)
+        token = uuid.uuid4().hex if page_key else ""
+        switches = ["-ScanOnly"]
+        if token:
+            switches.extend(["-ScanHandoff", token])
+        proc = spawn_ps(switches, scope="all")
+        _scan_handoff.update(token=token, page=page_key)
         _active_scan.update(pid=int(proc.pid), proc=proc)
     # 不在 HTTP 请求里等引擎写完 run.pid：那会把前端 busy 锁住 8 秒，
     # 用户刚点完识别就改不了范围。启动确认交给 /api/status 的 scan_proc。
@@ -1092,7 +1178,7 @@ def stop_run():
             if forced:
                 return True, '脚本未响应停止信号，已强制结束（PID %s）' % ', '.join(map(str, forced))
             if targets or candidates - {p['pid'] for p in launchers}:
-                return True, '已优雅停止，进度已写入运行日志'
+                return True, '已停止'
             return False, '当前没有在运行'
         finally:
             for proc in pinned:
@@ -1182,7 +1268,8 @@ def course_sections():
     with _course_lock:
         # 从同一打开句柄取身份与内容；整段加锁，旧读者不能覆盖新快照。
         if _course.get('path') != COURSE_FILE:
-            _course.update(key=None, val=[], t='', current='', courseid='', path=COURSE_FILE)
+            _course.update(key=None, val=[], t='', current='', courseid='', path=COURSE_FILE,
+                           handoff_token='', handoff_saved_at=0, identified=False, origin='')
         try:
             with open(COURSE_FILE, 'rb') as f:
                 st = os.fstat(f.fileno())
@@ -1197,7 +1284,8 @@ def course_sections():
             secs = core.normalize_course(d)
             stamp, cur_id = str(d.get('updated') or ''), str(d.get('current') or '')
         except FileNotFoundError:
-            _course.update(key=None, val=[], t='', current='', courseid='')
+            _course.update(key=None, val=[], t='', current='', courseid='',
+                           handoff_token='', handoff_saved_at=0, identified=False, origin='')
             return []
         except (OSError, ValueError, TypeError):
             # 分享冲突/半写只保留同一文件的上次有效数据，下次重试。
@@ -1207,6 +1295,10 @@ def course_sections():
         _course["t"] = stamp
         _course["current"] = cur_id
         _course['courseid'] = str(d.get('courseid') or '')
+        _course['identified'] = d.get('identified') is True
+        _course['origin'] = str(d.get('origin') or '')
+        _course['handoff_token'] = str(d.get('scan_handoff') or '')
+        _course['handoff_saved_at'] = st.st_mtime
         return copy.deepcopy(secs)
 
 
@@ -1264,7 +1356,10 @@ def build_status():
             if it.get("status") in ("播放中", "进行中"):
                 it["status"] = "中断"
     cur, p = info["current"] or {}, info["progress"] or {}
-    warn = info["warns"][-1] if info["warns"] else None
+    # 节奏提示由实时记录产生；历史拒绝日志仍留在动态列表。
+    local_guard = ("发生错误：课程读取间隔不足 ", "课程读取间隔检查失败，本次不请求网站")
+    warn = next((row for row in reversed(info["warns"])
+                 if not row["text"].startswith(local_guard)), None)
     strays = stray_engines()
     by_id, by_name, cur_id = course_lookup()
 
@@ -1426,6 +1521,15 @@ def build_status():
             note = '残留脚本暂未清理成功，稍后会重试'
             hint = '可点「停止」手动处理；身份无法核验时不会自动结束进程'
             warn = {'time': time.strftime('%H:%M'), 'level': '警告', 'text': note}
+    read_wait = course_read_wait()
+    start_issue = ''
+    can_start_from_scan = False
+    if not running and not scanning and not strays and cdp and page in ("video", "course"):
+        start_issue = start_course_issue(page_info)
+        can_start_from_scan = not start_issue
+        if start_issue and state in ("ready", "setup"):
+            state, state_text = "setup", "等待识别"
+            note = hint = start_issue
     # 本轮用时 / 预计剩余：都是清单里没有的聚合信息，避免和「讲次」列表重复。
     # 时长来自引擎本遍播放时记录的 duration；没播过的讲按已知均值估。
     elapsed, eta = core.estimate_times(info, running, done, time.time())
@@ -1441,6 +1545,8 @@ def build_status():
         "scan_scope": info.get("scan_scope", ""),
         "page": page, "page_title": page_title, "ver": BUILD_TAG, "caps": list(CAPS),
         "course_time": '' if different_course else _course.get("t", ""),
+        "read_wait_seconds": read_wait,
+        "can_start_from_scan": can_start_from_scan, "start_course_issue": start_issue,
         "elapsed_seconds": elapsed, "eta_seconds": eta, "run_ended": info.get("run_ended"),
         "planned": info["planned"], "current": cur, "progress": p,
         "items": info["items"], "done_count": done, "feed": info["feed"],
@@ -1702,6 +1808,7 @@ def main():
             f.write(str(os.getpid()))
     except OSError:
         pass
+    _log_reader.begin_session(LOGFILE)
     print("刷课控制台已启动: http://%s:%d" % (HOST, PORT), flush=True)
     cleanup_stale_pid()                 # 清掉指向"已经死掉的脚本"的旧 run.pid
     strays = stray_engines()
