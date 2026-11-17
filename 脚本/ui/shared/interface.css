@@ -62,3 +62,6 @@ html:has(.console-exit[open]){background:var(--parchment,var(--paper))}
   .console-exit *,.console-exit *::before{animation:none!important;transition:none!important}
   .console-exit[data-phase="complete"] .exit-check path{stroke-dashoffset:0}
 }
+
+/* 禁用反馈统一应用于两套控制台的按钮，包含仍可聚焦的 aria-disabled 按钮。 */
+button:is(:disabled,[aria-disabled="true"]){opacity:.68!important;cursor:default}
