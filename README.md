@@ -4,31 +4,22 @@
 
 <p align="center">
   <strong><a href="https://github.com/MuuZiy/liru-cloud-assistant/releases">下载 Windows 版</a></strong>
-  · <a href="使用说明.txt">新手教程</a>
-  · <a href="https://github.com/MuuZiy/liru-cloud-assistant/issues">反馈问题</a>
+  · <strong><a href="使用说明.txt">新手教程</a></strong>
+  · <a href="免责声明.txt">使用风险</a>
 </p>
 
 <p align="center"><sub>Windows 10/11（64 位） · Microsoft Edge</sub></p>
 
-<p align="center"><img src="https://github.com/user-attachments/assets/171accde-5d21-4627-8912-2c4a590ea548" alt="控制台展示示例课程的播放范围、本讲进度、讲次清单和最近动态" width="960"></p>
-<p align="center"><sub>控制台预览 · 示例课程数据</sub></p>
+## 功能介绍
 
-## 快速开始
+- **自动播放**　选好范围后，助手会按课程顺序自动播放视频。
+- **自动考勤确认**　遇到支持的考勤弹窗会自动确认，需要你亲自处理时会提醒你。
+- **后台运行**　开始后可以把 Edge 窗口最小化，让助手继续运行。
+- **按章选择**　可以从当前讲继续，也可以只播放你选的章节。
+- **查看进度**　打开控制台，就能看到正在播哪一讲、播了多久、还剩几讲。
 
-1. 下载 Windows ZIP 并完整解压。
-2. 在 Edge 登录课堂，按[新手教程](使用说明.txt)设置首次连接。
-3. 双击「打开控制台.bat」，接管 Edge、重新识别，选好范围后点「开始刷课」。
+第一次用，跟着[新手教程](使用说明.txt)操作就行。
 
-## 能做什么
+> **用前先看风险**　本项目仅供学习与交流。学校和平台规则以官方说明为准。使用本工具可能触发风控，包括设备登录或当前网络的 IP 地址访问受限。请先阅读[完整免责声明](免责声明.txt)。
 
-- **选范围**　从当前讲继续，或按章节选择。
-- **看进度**　按 1 倍速播放，在控制台查看本讲进度、已完成讲次和最近动态。
-- **处理确认提示**　支持自动考勤和学习确认。遇到需要人工处理的提示，请回课堂查看。
-
-## 隐私与使用说明
-
-工具在本机运行。账号由你在 Edge 登录，工具不保存账号密码。运行后会生成本地课程记录和日志，分享时请发原始 ZIP。
-
-本项目为非官方工具，仅用于学校和平台允许的本人学习场景。最终记录以课堂平台为准。
-
-[免责声明](免责声明.txt) · [MIT 许可](LICENSE) · [第三方许可](第三方许可.md)
+[反馈问题](https://github.com/MuuZiy/liru-cloud-assistant/issues) · [MIT 许可](LICENSE) · [第三方许可](第三方许可.md)
