@@ -1,5 +1,7 @@
-/* shared/poll.js — 控制台状态轮询：/api/status 获取 + 变更键。
-   经典脚本：顶层只新增 LiruPoll 一个名字，不碰页面其它全局声明。 */
+/* shared/poll.js — 两套界面共用的轮询构件：/api/status 获取 + 变更键。
+   经典脚本：顶层只新增 LiruPoll 一个名字，不碰页面其它全局声明。
+   为什么共用：两版曾各自实现一份（变更键一个排除 time 一个没排除、fetch 一个有
+   超时中止一个没有），行为已经实际漂移过；同一件事只留这一份。 */
 (function () {
   'use strict';
 
@@ -59,5 +61,18 @@
       : action === 'start' ? 'starting' : j.state;
     return Object.assign({}, j, {state, scan_proc: action === 'scan' || j.scan_proc});
   }
-  window.LiruPoll = { statusKey, fetchStatus, pollDelay, createLoop, presentation };
+  function readWaitText(j) {
+    const seconds = Number(j && j.read_wait_seconds);
+    return Number.isFinite(seconds) && seconds > 0 ? '再次识别还需等 ' + Math.ceil(seconds) + ' 秒' : '';
+  }
+  function scanResult(j, before, seen) {
+    if (j.alive || j.scan_proc || /^(scanning|starting)$/.test(j.state)) return '';
+    const finished = j.scan_only && j.run_ended && j.run_ended !== before.run_ended;
+    const saved = j.scan_at && j.scan_at !== before.scan_at;
+    if (j.scanned && (seen || saved || finished)) return 'success';
+    if (!j.scanned && (seen || finished)) return 'error';
+    return '';
+  }
+
+  window.LiruPoll = { readWaitText, scanResult, statusKey, fetchStatus, pollDelay, createLoop, presentation };
 })();
