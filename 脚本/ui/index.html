@@ -1986,7 +1986,12 @@ function updateSimpleScan(j){
   }
 }
 async function act(url, btn, busyText, body){
-  if(busy || simpleLost || (btn && btn.disabled && (url === '/api/start' || url === '/api/scan'))) return;
+  if(busy || simpleLost) return;
+  if(btn && btn.disabled && (url === '/api/start' || url === '/api/scan')){
+    const wait = url === '/api/scan' && LiruPoll.readWaitText(lastStatus);
+    if(wait) notify(wait, 4500);
+    return;
+  }
   busy=true;
   LiruFeedback.clear(btn,true);
   if(url==='/api/start'){
