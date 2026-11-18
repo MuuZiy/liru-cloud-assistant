@@ -11,7 +11,7 @@
 <p align="center"><sub>Windows 10/11（64 位） · Microsoft Edge</sub></p>
 
 > [!IMPORTANT]
-> **请点上方「下载 Windows 版」，在发布页的 Assets（附件）中选择 `liru-cloud-assistant-v1.0-windows.zip`。**
+> **请点上方「下载 Windows 版」，在发布页的 Assets（附件）中选择 `liru-cloud-assistant-v1.0.1-windows.zip`，不要选 Source code。**
 >
 > Windows 版自带 Python，解压后即可按教程启动。
 
