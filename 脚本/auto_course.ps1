@@ -271,12 +271,16 @@ function Enter-RequestGuard {
 
 function Get-SiteRisk {
     # 只读当前页面的可见提示，不额外发请求。考勤弹窗不在此列（由自动长按处理）。
-    param($Ws)
+    param($Ws, [switch]$RequireObservation)
     try {
         $raw = Invoke-Js -Ws $Ws -Expression $JsSiteRiskProbe -TimeoutMs 5000
-        if ([string]::IsNullOrEmpty($raw)) { return $null }
-        $o = ConvertFrom-Json -InputObject $raw
-        if (-not $o) { return $null }
+        $o = if ($raw) { ConvertFrom-Json -InputObject $raw }
+    } catch { $o = $null }
+    if (-not $o -or 'risk' -notin $o.PSObject.Properties.Name) {
+        if ($RequireObservation) { return @{risk='unreadable'; reason='暂时无法读取课堂页面'} }
+        return $null
+    }
+    try {
         $handoff = $script:PlaybackHandoff
         if (-not $o.risk) {
             if ($handoff) { $handoff.notice = '' }
@@ -302,7 +306,7 @@ function Get-SiteRisk {
             return $null
         }
         return $next
-    } catch { }
+    } catch { if ($RequireObservation) { return $o } }
     return $null
 }
 
@@ -315,15 +319,19 @@ function Pause-ForSiteRisk {
     if ([string]::IsNullOrWhiteSpace($reason)) { $reason = [string]$Risk.risk }
     $maxMin = 10
     if ($Cfg -and [int]$Cfg.risk_pause_max_minutes -gt 0) { $maxMin = [int]$Cfg.risk_pause_max_minutes }
-    Write-Log ("检测到平台风控提示：{0}。已暂停播放，等待你处理（不会自动重试、不会提交完成）" -f $reason) '警告'
-    try { $null = Invoke-Js -Ws $Ws -Expression $JsPauseVideo -TimeoutMs 4000 } catch { }
+    if ($ScanOnly) {
+        Write-Log ("检测到平台风控提示：{0}。已暂停识别，等待你处理" -f $reason) '警告'
+    } else {
+        Write-Log ("检测到平台风控提示：{0}。已暂停播放，等待你处理（不会自动重试、不会提交完成）" -f $reason) '警告'
+        try { $null = Invoke-Js -Ws $Ws -Expression $JsPauseVideo -TimeoutMs 4000 } catch { }
+    }
     Show-Reminder -Title '平台风控提示，需要你处理' -Text ("{0}。请在 Edge 中完成验证/关闭其它视频/等待限制解除；脚本最多等你 {1} 分钟。" -f $reason, $maxMin)
     $deadline = (Get-Date).AddMinutes($maxMin)
     $round = 0
     while ((Get-Date) -lt $deadline) {
         if (Test-StopRequested) { return 'stopped' }
         Start-Sleep -Milliseconds (Get-JitterMs -BaseMs 8000 -Percent 20)
-        $again = Get-SiteRisk -Ws $Ws
+        $again = Get-SiteRisk -Ws $Ws -RequireObservation
         if (-not $again) {
             Write-Log '平台提示已消失，继续当前任务' '成功'
             return 'ok'
@@ -1244,6 +1252,10 @@ $JsActivityProbe = @'
     var ctrl = new AbortController(), timer = setTimeout(function(){ctrl.abort();}, 10000);
     try {
       var r = await fetch(url, {method:method, credentials:'same-origin', mode:'same-origin', redirect:'follow', signal:ctrl.signal});
+      if (r.status === 403 || r.status === 429) {
+        if (r.body) r.body.cancel().catch(function(){});
+        return { restricted: r.status };
+      }
       var final = new URL(r.url || url, location.origin);
       if (!r.ok || final.origin !== location.origin || /\/login\//.test(final.pathname)) {
         if (r.body) await r.body.cancel();
@@ -1267,6 +1279,7 @@ $JsActivityProbe = @'
       // GET 响应为二进制时 request 会立即取消 body，不下载媒体。
       var g = null;
       try { g = await request(url, 'GET'); } catch (e) {}
+      if (g && g.restricted) return JSON.stringify({restricted:g.restricted});
       if (g) {
         if (g.kind) rec = {kind:g.kind, by:'mime-get', mime:g.mime, confidence:'high'};
         else if (g.html) {
@@ -1278,6 +1291,7 @@ $JsActivityProbe = @'
         // 少数 GET 不可读、HEAD 仍能提供文件 MIME 的服务保留只读兜底。
         var h = null;
         try { h = await request(url, 'HEAD'); } catch (e) {}
+        if (h && h.restricted) return JSON.stringify({restricted:h.restricted});
         if (h && h.kind) rec = {kind:h.kind, by:'mime', mime:h.mime, confidence:'high'};
       }
     } catch (e) { rec = {kind:'unknown', by:'error', mime:'', confidence:'low'}; }
@@ -1427,6 +1441,7 @@ function Wait-PageReady {
             $risk = Get-SiteRisk -Ws $Ws
             if ($risk) {
                 $pr = Pause-ForSiteRisk -Ws $Ws -Risk $risk -Cfg $script:Cfg
+                if ($pr -eq 'timeout') { $script:SiteRiskStop = $true }
                 if ($pr -ne 'ok') { return $false }
             }
         }
@@ -1635,6 +1650,7 @@ function Invoke-ActivityProbe {
             $risk = Get-SiteRisk -Ws $Ws
             if ($risk) {
                 $pr = Pause-ForSiteRisk -Ws $Ws -Risk $risk -Cfg $script:Cfg
+                if ($pr -eq 'timeout') { throw '平台提示未解除，本轮重新识别已停止。请在 Edge 处理后再试。' }
                 if ($pr -ne 'ok') { break }
             }
         }
@@ -1642,11 +1658,17 @@ function Invoke-ActivityProbe {
         if ($id -notmatch '^\d+$' -or $mod -notmatch '^[a-z][a-z0-9_]*$') { continue }
         $entry = @([ordered]@{ id = $id; mod = $mod })
         $js = $JsActivityProbe.Replace('__ITEMS__', (ConvertTo-Json -InputObject $entry -Compress))
+        $obj = $null
         try {
             $raw = Invoke-Js -Ws $Ws -Expression $js -TimeoutMs 25000
             $obj = ConvertFrom-Json -InputObject $raw
-            foreach ($p in @($obj.PSObject.Properties)) { if ($p.Value) { $map[[string]$p.Name] = $p.Value } }
         } catch { }
+        if ($obj.restricted -in @(403, 429)) {
+            throw ("平台限制了本次读取（HTTP {0}）。请在 Edge 查看平台提示，恢复后再点「重新识别」。" -f $obj.restricted)
+        }
+        if ($obj) {
+            foreach ($p in @($obj.PSObject.Properties)) { if ($p.Value) { $map[[string]$p.Name] = $p.Value } }
+        }
         if (Test-StopRequested) { break }
         Start-Sleep -Milliseconds (Get-JitterMs -BaseMs 900 -Percent 35)
     }
@@ -1778,11 +1800,14 @@ $JsBatchCompletion = (@'
     } catch (e) { return null; }
   }
   var out = {};
+  var restricted = 0;
   function runBatch(batch) {
+    if (restricted) return;
     return Promise.all(batch.map(function (it) {
       var ctrl = new AbortController(), timer = setTimeout(function(){ctrl.abort();}, 10000);
       return fetch(it.url, { credentials: 'same-origin', mode: 'same-origin', signal: ctrl.signal })
         .then(function (r) {
+          if (r.status === 403 || r.status === 429) restricted = r.status;
           var expected = new URL(it.url, location.origin), actual = new URL(r.url || it.url, location.origin);
           if (!r.ok || actual.origin !== expected.origin || actual.pathname !== expected.pathname ||
               actual.searchParams.get('id') !== expected.searchParams.get('id') ||
@@ -1801,7 +1826,7 @@ $JsBatchCompletion = (@'
   for (var i = 0; i < items.length; i += BATCH) {
     (function (b) { chain = chain.then(function () { return runBatch(b); }); })(items.slice(i, i + BATCH));
   }
-  return chain.then(function () { return JSON.stringify(out); });
+  return chain.then(function () { return JSON.stringify(restricted ? {restricted:restricted} : out); });
 })()
 '@).Replace('__JUDGE__', $JudgeFnJs)
 
@@ -1825,6 +1850,9 @@ function Get-CompletionByProbe {
     $obj = $null
     try { $obj = ConvertFrom-Json -InputObject $raw } catch { return $null }
     if (-not $obj) { return $null }
+    if ($obj.restricted -in @(403, 429)) {
+        throw ("平台限制了本次读取（HTTP {0}）。请在 Edge 查看平台提示，恢复后再点「重新识别」。" -f $obj.restricted)
+    }
     $res = @{}
     foreach ($p in @($obj.PSObject.Properties)) {
         if ($null -eq $p.Value) { continue }
@@ -1860,21 +1888,20 @@ function Get-PendingVideos {
         Write-Log ("有 {0} 讲读不到平台完成状态，正在实时核对…" -f $need.Count) '信息'
         $probe = $null
         $pStart = Get-Date
-        try {
-            $res = @{}
-            foreach ($v in $need) {
-                if (Test-StopRequested) { return $null }
-                $risk = Get-SiteRisk -Ws $Ws
-                if ($risk) {
-                    $pr = Pause-ForSiteRisk -Ws $Ws -Risk $risk -Cfg $script:Cfg
-                    if ($pr -ne 'ok') { return $null }
-                }
-                $one = Get-CompletionByProbe -Ws $Ws -Videos @($v)
-                if ($one) { foreach ($id in $one.results.Keys) { $res[$id] = $one.results[$id] } }
-                Start-Sleep -Milliseconds (Get-JitterMs -BaseMs 900 -Percent 35)
+        $res = @{}
+        foreach ($v in $need) {
+            if (Test-StopRequested) { return $null }
+            $risk = Get-SiteRisk -Ws $Ws
+            if ($risk) {
+                $pr = Pause-ForSiteRisk -Ws $Ws -Risk $risk -Cfg $script:Cfg
+                if ($pr -eq 'timeout') { throw '平台提示未解除，本轮重新识别已停止。请在 Edge 处理后再试。' }
+                if ($pr -ne 'ok') { return $null }
             }
-            if ($res.Count) { $probe = @{results=$res; judged=$res.Count; total=$need.Count} }
-        } catch { }
+            $one = Get-CompletionByProbe -Ws $Ws -Videos @($v)
+            if ($one) { foreach ($id in $one.results.Keys) { $res[$id] = $one.results[$id] } }
+            Start-Sleep -Milliseconds (Get-JitterMs -BaseMs 900 -Percent 35)
+        }
+        if ($res.Count) { $probe = @{results=$res; judged=$res.Count; total=$need.Count} }
         if ($probe) {
             foreach ($v in $need) {
                 $id = [string]$v.id
@@ -2462,6 +2489,11 @@ function Invoke-WatchVideo {
                 Write-Log ("页面被跳走了（当前 {0}，目标 {1}）—— 直接导航回来继续" -f $shownAid, $Video.id) '提醒'
                 $null = Send-CdpCommand -Ws $Ws -Method 'Page.navigate' -Params @{ url = $url }
                 $null = Wait-PageReady -Ws $Ws -Url $url -ReadyJs (Get-ReadyJsForId -Id ([string]$Video.id)) -TimeoutSec 60
+                if ($script:SiteRiskStop) {
+                    $result.状态 = '风控停止'
+                    $result.备注 = '平台提示未解除'
+                    return $result
+                }
                 $escapeN = 0
                 $lastPct = -1
                 $idleSince = Get-Date
@@ -2943,7 +2975,7 @@ finally {
     try {
         if ($script:Ws) {
             # 只读自检不改变媒体状态；正常任务退出仍暂停当前课堂视频。
-            if (-not $SelfTest) {
+            if (-not ($SelfTest -or $ScanOnly -or $DryRun)) {
                 try {
                     $pr = Invoke-Js -Ws $script:Ws -Expression $JsPauseVideo -TimeoutMs 5000
                     if ($pr -eq 'paused') { Write-Log '已暂停页面中的视频' '信息' }

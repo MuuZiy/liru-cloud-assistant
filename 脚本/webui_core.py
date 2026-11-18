@@ -221,8 +221,7 @@ class LogState:
                 if self.cur:
                     for it in self.items:
                         if self._current_row(it) and it["status"] != "已完成":
-                            it.update(pct=pct, dur=self.progress["dur"], cur=self.progress["cur"],
-                                      status="播放中" if pct < 100 else "已完成")
+                            it.update(pct=pct, dur=self.progress["dur"], cur=self.progress["cur"], status="播放中")
                 else:
                     # ⚠ 进度条在"当前讲"未知时**不能丢**。
                     # 引擎有一类路径（接管你已打开的视频页）不写 `--- 第 N/M 讲 ---` 表头，
