@@ -10,6 +10,11 @@
 
 <p align="center"><sub>Windows 10/11（64 位） · Microsoft Edge</sub></p>
 
+> [!IMPORTANT]
+> **Windows 用户请点上方「下载 Windows 版」**，在发布页的附件（Assets）中选择文件名以 `-windows.zip` 结尾的发布包。包内自带 Python，解压后双击 `打开控制台.bat` 即可。
+>
+> **Fork、`Code → Download ZIP` 和 `Source code (zip)` 获取的是源码。** 源码不带 Python，运行前需自行安装 Python，并确保系统能找到 `pythonw.exe`。
+
 ![使用模拟课程数据的控制台截图](console-preview.jpg)
 
 *界面演示使用模拟课程数据。*
