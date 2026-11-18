@@ -3,7 +3,8 @@
 <p align="center"><strong>将视频交给助手，把时间留给自己。</strong></p>
 
 <p align="center">
-  <strong><a href="https://github.com/MuuZiy/liru-cloud-assistant/releases">下载 Windows 版</a></strong>
+  <strong><a href="https://github.com/MuuZiy/liru-cloud-assistant/releases/latest">下载 Windows 稳定版</a></strong>
+  · <a href="https://github.com/MuuZiy/liru-cloud-assistant/releases">查看测试版</a>
   · <strong><a href="使用说明.txt">新手教程</a></strong>
   · <a href="免责声明.txt">免责声明</a>
 </p>
@@ -11,9 +12,9 @@
 <p align="center"><sub>Windows 10/11（64 位） · Microsoft Edge</sub></p>
 
 > [!IMPORTANT]
-> **请点上方「下载 Windows 版」，在发布页的 Assets（附件）中选择 `liru-cloud-assistant-v1.0.1-windows.zip`，不要选 Source code。**
+> **日常使用请选择「下载 Windows 稳定版」。** 在发布页的 Assets（附件）中下载文件名以 `-windows.zip` 结尾的安装包，不要选 Source code。
 >
-> Windows 版自带 Python，解压后即可按教程启动。
+> 标有 **Pre-release** 的是测试版。v1.0.1 已通过离线验证，尚未测试真实课程。Windows 版自带 Python，解压后即可按教程启动。
 
 ![使用模拟课程数据的控制台截图](console-preview.jpg)
 
